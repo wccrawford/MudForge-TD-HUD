@@ -10,8 +10,104 @@ plugin = {
   settings = { saveState = true },
 }
 
-local countdown = require("countdown")
+local status = require("status")
 local widgets = require("widgets")   -- { status = html, effects = html, slots = html }, built from src/widgets/
 
+-- One top-anchored column on the right edge (wayfinder #14): Status / Effects /
+-- Slots top-down, 12 px from the edge and between widgets. Heights include
+-- MudForge's ~30 px title bar. Each widget ticket appends its entry here.
+local COLUMN = { width = 240, edge = 12, gap = 12 }
+local ORDER = {
+  { name = "status", title = "Status", height = 176 },
+}
+
+local TICK_MS = 100       -- the shared Countdown tick
+local REPUSH_MS = 750     -- bound values pushed right after content is set are lost (#6)
+
+local hud = {
+  status = { id = nil, s = status.new() },
+}
+local tick = nil
+
+-- Create every widget in ORDER down the column. MudForge's saved placement
+-- overrides these positions on later loads, so this only decides first install.
+local function createColumn()
+  local win = getWindowSize() or {}
+  local x = (win.width or 0) - COLUMN.width - COLUMN.edge
+  if x < 0 then x = 0 end
+  local y = COLUMN.edge
+  for _, w in ipairs(ORDER) do
+    local id = createWidget({
+      type = "html",
+      name = w.name,
+      title = w.title,
+      position = { x = x, y = y },
+      size = { width = COLUMN.width, height = w.height },
+    })
+    setWidgetProperty(id, "content", widgets[w.name])
+    hud[w.name].id = id
+    y = y + w.height + COLUMN.gap
+  end
+end
+
+local function pushStatus(now)
+  setBoundValues(hud.status.id, status.keys(hud.status.s, now))
+end
+
+local function pushAll()
+  local now = getCurrentTime()
+  pushStatus(now)
+end
+
+local function onTick()
+  local now = getCurrentTime()
+  local s = hud.status.s
+  local counting = s.rt ~= nil
+  status.tick(s, now)
+  if counting then pushStatus(now) end   -- includes the tick that reaches Clear
+end
+
+local function stopTick()
+  if tick ~= nil and tick ~= "" then removeTimer(tick) end
+  tick = nil
+end
+
+-- The attach routine (wayfinder #9), shared by init and onConnect: reset every
+-- widget to Unfed, start the tick, and ask the server to re-send every package
+-- with a fresh now_ms. Timers and sendGMCP silently no-op while disconnected;
+-- onConnect runs this again.
+local function attach()
+  hud.status.s = status.new()
+  pushAll()
+  stopTick()
+  tick = addTimer(TICK_MS, onTick, true)
+  sendGMCP("Core.Hello", { client = plugin.id, version = plugin.version })
+end
+
 function init()
+  createColumn()
+
+  onGMCPUpdate("Char.Vitals", function(pkg)
+    status.vitals(hud.status.s, pkg)
+    pushStatus(getCurrentTime())
+  end)
+  onGMCPUpdate("Char.RoundTime", function(pkg)
+    local now = getCurrentTime()
+    status.roundtime(hud.status.s, pkg, now)
+    pushStatus(now)
+  end)
+
+  attach()
+  addTimer(REPUSH_MS, pushAll, false)
+end
+
+function onConnect()
+  attach()
+end
+
+function onDisconnect()
+  local now = getCurrentTime()
+  status.sever(hud.status.s, now)
+  pushStatus(now)
+  stopTick()
 end

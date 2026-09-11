@@ -23,7 +23,56 @@ __libs["countdown"] = (function()
 -- Countdown: a widget-side clock that drains toward an instant the Feed named.
 -- Pure Lua 5.1 library: no globals, no clock (`now` is always an argument),
 -- library-sandbox stdlib only (no Lua patterns, no string.format widths).
+--
+-- A Countdown is `{ ends_at = ms, span = ms }` on the caller's clock, or nil
+-- when Clear. Policy (CONTEXT.md, wayfinder #7): anchor at arrival, 100 ms
+-- dead-band, a Stack refills the Span, local Clear is authoritative.
 local M = {}
+
+M.DEAD_BAND_MS = 100
+
+-- Apply a push carrying `remaining` ms (already `end - now_ms` from the Feed's
+-- own clock). Returns the Countdown to keep. A push of nothing left clears.
+function M.push(cd, remaining, now)
+  if remaining == nil or remaining <= 0 then return nil end
+  local ends_at = now + remaining
+  if cd ~= nil and cd.ends_at > now then
+    local delta = ends_at - cd.ends_at
+    if delta >= -M.DEAD_BAND_MS and delta <= M.DEAD_BAND_MS then return cd end
+    -- A Stack (lengthened) refills the bar; a shortening keeps the Span.
+    local span = cd.span
+    if delta > 0 then span = remaining end
+    return { ends_at = ends_at, span = span }
+  end
+  return { ends_at = ends_at, span = remaining }
+end
+
+-- Advance the local clock: nil once the Countdown has reached Clear.
+function M.tick(cd, now)
+  if cd == nil or cd.ends_at <= now then return nil end
+  return cd
+end
+
+-- Milliseconds left, never negative; 0 when nil.
+function M.remaining(cd, now)
+  if cd == nil then return 0 end
+  local left = cd.ends_at - now
+  if left < 0 then left = 0 end
+  return left
+end
+
+-- Whole seconds, rounded up: reads `1` until the instant of Clear, never `0`.
+function M.seconds(cd, now)
+  return math.ceil(M.remaining(cd, now) / 1000)
+end
+
+-- Fill percentage of a draining bar (0..100, one decimal).
+function M.pct(cd, now)
+  if cd == nil or cd.span <= 0 then return 0 end
+  local p = M.remaining(cd, now) / cd.span * 100
+  if p > 100 then p = 100 end
+  return math.floor(p * 10 + 0.5) / 10
+end
 
 local function pad2(n)
   if n < 10 then return "0" .. n end
@@ -41,18 +90,186 @@ end
 return M
 end)()
 
+-- lib/status.lua
+__libs["status"] = (function()
+  local require = __require
+-- Status: the view-model behind the Status widget (Condition / Focus /
+-- Footing meters, Round Time bar, Standing + Encumbrance + held power).
+-- Pure Lua 5.1 library: the wiring owns a state table from `new()`, feeds it
+-- Feed snapshots and the local clock, and pushes `keys()` through
+-- setBoundValues. Widget states are Unfed / Live / Severed (CONTEXT.md).
+local countdown = require("countdown")
+
+local M = {}
+
+function M.new()
+  return { state = "unfed", vitals = nil, rt = nil, frozen_at = nil }
+end
+
+-- Char.Vitals snapshot: the widget goes Live on its own package's first push.
+function M.vitals(s, pkg)
+  if pkg == nil then return s end
+  s.vitals = pkg
+  s.state = "live"
+  return s
+end
+
+-- Char.RoundTime snapshot: `0` or an instant already passed means clear.
+function M.roundtime(s, pkg, now)
+  if pkg == nil then return s end
+  local remaining = 0
+  if pkg.clears_at_ms ~= nil and pkg.clears_at_ms ~= 0 then
+    remaining = pkg.clears_at_ms - (pkg.now_ms or 0)
+  end
+  s.rt = countdown.push(s.rt, remaining, now)
+  return s
+end
+
+-- The local tick; returns true when the Round Time just reached Clear so the
+-- caller knows the bar must be pushed one last time.
+function M.tick(s, now)
+  if s.state == "severed" then return false end
+  local had = s.rt ~= nil
+  s.rt = countdown.tick(s.rt, now)
+  return had and s.rt == nil
+end
+
+-- Connection lost: keep the last-known values, freeze the Countdown here.
+function M.sever(s, now)
+  if s.state == "live" then
+    s.state = "severed"
+    s.frozen_at = now
+  end
+  return s
+end
+
+local function pct(cur, max)
+  if cur == nil or max == nil or max <= 0 then return 0 end
+  local p = cur / max * 100
+  if p < 0 then p = 0 elseif p > 100 then p = 100 end
+  return math.floor(p * 10 + 0.5) / 10
+end
+
+local function meter(k, key, m)
+  if m == nil then
+    k[key .. "Name"] = ""
+    k[key .. "Cur"] = ""
+    k[key .. "Max"] = ""
+    k[key .. "Tier"] = ""
+    k[key .. "Pct"] = "0%"
+    k[key .. "Tip"] = ""
+    return
+  end
+  k[key .. "Name"] = m.name or ""
+  k[key .. "Cur"] = m.cur == nil and "" or m.cur
+  k[key .. "Max"] = m.max == nil and "" or m.max
+  k[key .. "Tier"] = m.tier == nil and "" or m.tier
+  k[key .. "Pct"] = pct(m.cur, m.max) .. "%"
+  k[key .. "Tip"] = tostring(m.cur) .. "/" .. tostring(m.max)
+end
+
+-- The complete bound-value key set for the Status widget's markup.
+function M.keys(s, now)
+  local k = { hudState = s.state }
+  local v = s.vitals or {}
+  meter(k, "cond", v.condition)
+  meter(k, "focus", v.focus)
+  meter(k, "foot", v.footing)
+  if v.power ~= nil then
+    k.powerName = v.power.name or ""
+    k.powerCur = v.power.cur == nil and "" or v.power.cur
+    k.powerTier = v.power.tier == nil and "" or v.power.tier
+    k.powerDisplay = ""
+  else
+    k.powerName = ""
+    k.powerCur = ""
+    k.powerTier = ""
+    k.powerDisplay = "none"
+  end
+  k.standName = v.standing and v.standing.name or ""
+  k.encum = v.encumbrance == nil and "" or v.encumbrance
+
+  if s.state == "severed" and s.frozen_at ~= nil then now = s.frozen_at end
+  local cd = countdown.tick(s.rt, now)
+  if cd ~= nil then
+    k.rtDisplay = ""
+    k.rtPct = countdown.pct(cd, now) .. "%"
+    k.rtSec = countdown.seconds(cd, now)
+  else
+    k.rtDisplay = "none"
+    k.rtPct = "0%"
+    k.rtSec = ""
+  end
+  return k
+end
+
+return M
+end)()
+
 -- src/widgets/*.html, each with shared.css inlined
 __libs["widgets"] = {
   ["status"] = [==[
 <style>
 /* Inlined into every widget by tools/build.js as a <style> block ahead of its html. */
+html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25 "Segoe UI",system-ui,sans-serif;overflow:hidden}
+*{box-sizing:border-box}
+/* tier ramp: 1 best … 5 worst (Condition / Footing / Focus), red-first like the built-in gauge;
+   power 1 strongest … 4 slightest */
+[data-tier="1"]{--c:#3fb950}[data-tier="2"]{--c:#d4c33a}[data-tier="3"]{--c:#f0883e}[data-tier="4"]{--c:#f25c3c}[data-tier="5"]{--c:#e5232b}
+[data-ptier="1"]{--p:#c084fc}[data-ptier="2"]{--p:#a78bfa}[data-ptier="3"]{--p:#8b7cf6}[data-ptier="4"]{--p:#6e6ad6}
+.rtc{--rt:#58a6ff}
+/* widget states (CONTEXT.md): Unfed and Severed share one dimmed treatment; Live is full strength */
+.hud{transition:opacity .2s}
+.hud[data-state="unfed"],.hud[data-state="severed"]{opacity:.45}
 </style>
-<!-- status widget: replaced by its build ticket -->
-<div class="hud hud-status"></div>
+<!-- Status widget: variant A "Stacked meters" from wayfinder #5. Content is set once;
+     every value below is a bound key from lib/status.lua's keys(). Defaults are the
+     Unfed skeleton so the widget is right before any push lands. -->
+<style>
+  .hud{display:flex;flex-direction:column;gap:5px;padding:2px 0}
+  .row{display:grid;grid-template-columns:66px 1fr 52px;align-items:center;gap:6px}
+  .lbl{color:#8b949e;font-size:12px}
+  .bar{position:relative;height:18px;background:#0d1117;border:1px solid #30363d;border-radius:3px;overflow:hidden}
+  .fill{position:absolute;top:0;bottom:0;left:0;background:var(--c,#555);transition:width .25s}
+  .word{position:absolute;inset:0;display:flex;align-items:center;padding-left:6px;font-size:12px;color:#fff;text-shadow:0 0 3px #000,0 0 2px #000;white-space:nowrap}
+  .num{color:#8b949e;font-size:12px;text-align:right;font-variant-numeric:tabular-nums}
+  .rt{position:relative;height:16px;background:#0d1117;border:1px solid #30363d;border-radius:3px;overflow:hidden;margin-top:2px}
+  .rtfill{position:absolute;top:0;bottom:0;left:0;background:var(--rt);transition:width .1s linear}
+  .rtsec{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff;text-shadow:0 0 3px #000}
+  .foot{display:flex;flex-direction:column;gap:1px;font-size:12px;color:#8b949e;margin-top:2px;white-space:nowrap}
+  .foot .l{display:flex;justify-content:space-between}
+  .pw{color:var(--p)}
+</style>
+<div class="hud hud-status" data-state="unfed" data-mud-bind-attr="data-state:hudState">
+  <div class="row"><span class="lbl">Condition</span>
+    <div class="bar" data-mud-bind-attr="title:condTip"><div class="fill" data-mud-bind-attr="data-tier:condTier" data-mud-bind-style="width:condPct"></div><span class="word" data-mud-bind="condName"></span></div>
+    <span class="num"><span data-mud-bind="condCur"></span>/<span data-mud-bind="condMax"></span></span></div>
+  <div class="row"><span class="lbl">Focus</span>
+    <div class="bar" data-mud-bind-attr="title:focusTip"><div class="fill" data-mud-bind-attr="data-tier:focusTier" data-mud-bind-style="width:focusPct"></div><span class="word" data-mud-bind="focusName"></span></div>
+    <span class="num"><span data-mud-bind="focusCur"></span>/<span data-mud-bind="focusMax"></span></span></div>
+  <div class="row"><span class="lbl">Footing</span>
+    <div class="bar" data-mud-bind-attr="title:footTip"><div class="fill" data-mud-bind-attr="data-tier:footTier" data-mud-bind-style="width:footPct"></div><span class="word" data-mud-bind="footName"></span></div>
+    <span class="num"><span data-mud-bind="footCur"></span>/<span data-mud-bind="footMax"></span></span></div>
+  <div class="rt rtc" style="display:none" data-mud-bind-style="display:rtDisplay"><div class="rtfill" data-mud-bind-style="width:rtPct"></div><span class="rtsec" data-mud-bind="rtSec"></span></div>
+  <div class="foot">
+    <div class="l"><span title="Standing" data-mud-bind="standName"></span><span>Enc <span data-mud-bind="encum"></span>%</span></div>
+    <div class="pw" style="display:none" data-mud-bind-attr="data-ptier:powerTier" data-mud-bind-style="display:powerDisplay">Holding <span data-mud-bind="powerName"></span> (<span data-mud-bind="powerCur"></span>)</div>
+  </div>
+</div>
 ]==],
   ["effects"] = [==[
 <style>
 /* Inlined into every widget by tools/build.js as a <style> block ahead of its html. */
+html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25 "Segoe UI",system-ui,sans-serif;overflow:hidden}
+*{box-sizing:border-box}
+/* tier ramp: 1 best … 5 worst (Condition / Footing / Focus), red-first like the built-in gauge;
+   power 1 strongest … 4 slightest */
+[data-tier="1"]{--c:#3fb950}[data-tier="2"]{--c:#d4c33a}[data-tier="3"]{--c:#f0883e}[data-tier="4"]{--c:#f25c3c}[data-tier="5"]{--c:#e5232b}
+[data-ptier="1"]{--p:#c084fc}[data-ptier="2"]{--p:#a78bfa}[data-ptier="3"]{--p:#8b7cf6}[data-ptier="4"]{--p:#6e6ad6}
+.rtc{--rt:#58a6ff}
+/* widget states (CONTEXT.md): Unfed and Severed share one dimmed treatment; Live is full strength */
+.hud{transition:opacity .2s}
+.hud[data-state="unfed"],.hud[data-state="severed"]{opacity:.45}
 </style>
 <!-- effects widget: replaced by its build ticket -->
 <div class="hud hud-effects"></div>
@@ -60,6 +277,16 @@ __libs["widgets"] = {
   ["slots"] = [==[
 <style>
 /* Inlined into every widget by tools/build.js as a <style> block ahead of its html. */
+html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25 "Segoe UI",system-ui,sans-serif;overflow:hidden}
+*{box-sizing:border-box}
+/* tier ramp: 1 best … 5 worst (Condition / Footing / Focus), red-first like the built-in gauge;
+   power 1 strongest … 4 slightest */
+[data-tier="1"]{--c:#3fb950}[data-tier="2"]{--c:#d4c33a}[data-tier="3"]{--c:#f0883e}[data-tier="4"]{--c:#f25c3c}[data-tier="5"]{--c:#e5232b}
+[data-ptier="1"]{--p:#c084fc}[data-ptier="2"]{--p:#a78bfa}[data-ptier="3"]{--p:#8b7cf6}[data-ptier="4"]{--p:#6e6ad6}
+.rtc{--rt:#58a6ff}
+/* widget states (CONTEXT.md): Unfed and Severed share one dimmed treatment; Live is full strength */
+.hud{transition:opacity .2s}
+.hud[data-state="unfed"],.hud[data-state="severed"]{opacity:.45}
 </style>
 <!-- slots widget: replaced by its build ticket -->
 <div class="hud hud-slots"></div>
@@ -73,8 +300,104 @@ local require = __require
 -- TextDungeonC's GMCP Feed. This is the source; the file MudForge imports is
 -- the built textdungeon-hud.lua at the repo root (ADR 0001).
 
-local countdown = require("countdown")
+local status = require("status")
 local widgets = require("widgets")   -- { status = html, effects = html, slots = html }, built from src/widgets/
 
+-- One top-anchored column on the right edge (wayfinder #14): Status / Effects /
+-- Slots top-down, 12 px from the edge and between widgets. Heights include
+-- MudForge's ~30 px title bar. Each widget ticket appends its entry here.
+local COLUMN = { width = 240, edge = 12, gap = 12 }
+local ORDER = {
+  { name = "status", title = "Status", height = 176 },
+}
+
+local TICK_MS = 100       -- the shared Countdown tick
+local REPUSH_MS = 750     -- bound values pushed right after content is set are lost (#6)
+
+local hud = {
+  status = { id = nil, s = status.new() },
+}
+local tick = nil
+
+-- Create every widget in ORDER down the column. MudForge's saved placement
+-- overrides these positions on later loads, so this only decides first install.
+local function createColumn()
+  local win = getWindowSize() or {}
+  local x = (win.width or 0) - COLUMN.width - COLUMN.edge
+  if x < 0 then x = 0 end
+  local y = COLUMN.edge
+  for _, w in ipairs(ORDER) do
+    local id = createWidget({
+      type = "html",
+      name = w.name,
+      title = w.title,
+      position = { x = x, y = y },
+      size = { width = COLUMN.width, height = w.height },
+    })
+    setWidgetProperty(id, "content", widgets[w.name])
+    hud[w.name].id = id
+    y = y + w.height + COLUMN.gap
+  end
+end
+
+local function pushStatus(now)
+  setBoundValues(hud.status.id, status.keys(hud.status.s, now))
+end
+
+local function pushAll()
+  local now = getCurrentTime()
+  pushStatus(now)
+end
+
+local function onTick()
+  local now = getCurrentTime()
+  local s = hud.status.s
+  local counting = s.rt ~= nil
+  status.tick(s, now)
+  if counting then pushStatus(now) end   -- includes the tick that reaches Clear
+end
+
+local function stopTick()
+  if tick ~= nil and tick ~= "" then removeTimer(tick) end
+  tick = nil
+end
+
+-- The attach routine (wayfinder #9), shared by init and onConnect: reset every
+-- widget to Unfed, start the tick, and ask the server to re-send every package
+-- with a fresh now_ms. Timers and sendGMCP silently no-op while disconnected;
+-- onConnect runs this again.
+local function attach()
+  hud.status.s = status.new()
+  pushAll()
+  stopTick()
+  tick = addTimer(TICK_MS, onTick, true)
+  sendGMCP("Core.Hello", { client = plugin.id, version = plugin.version })
+end
+
 function init()
+  createColumn()
+
+  onGMCPUpdate("Char.Vitals", function(pkg)
+    status.vitals(hud.status.s, pkg)
+    pushStatus(getCurrentTime())
+  end)
+  onGMCPUpdate("Char.RoundTime", function(pkg)
+    local now = getCurrentTime()
+    status.roundtime(hud.status.s, pkg, now)
+    pushStatus(now)
+  end)
+
+  attach()
+  addTimer(REPUSH_MS, pushAll, false)
+end
+
+function onConnect()
+  attach()
+end
+
+function onDisconnect()
+  local now = getCurrentTime()
+  status.sever(hud.status.s, now)
+  pushStatus(now)
+  stopTick()
 end

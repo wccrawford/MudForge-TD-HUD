@@ -1,1 +1,11 @@
 /* Inlined into every widget by tools/build.js as a <style> block ahead of its html. */
+html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25 "Segoe UI",system-ui,sans-serif;overflow:hidden}
+*{box-sizing:border-box}
+/* tier ramp: 1 best … 5 worst (Condition / Footing / Focus), red-first like the built-in gauge;
+   power 1 strongest … 4 slightest */
+[data-tier="1"]{--c:#3fb950}[data-tier="2"]{--c:#d4c33a}[data-tier="3"]{--c:#f0883e}[data-tier="4"]{--c:#f25c3c}[data-tier="5"]{--c:#e5232b}
+[data-ptier="1"]{--p:#c084fc}[data-ptier="2"]{--p:#a78bfa}[data-ptier="3"]{--p:#8b7cf6}[data-ptier="4"]{--p:#6e6ad6}
+.rtc{--rt:#58a6ff}
+/* widget states (CONTEXT.md): Unfed and Severed share one dimmed treatment; Live is full strength */
+.hud{transition:opacity .2s}
+.hud[data-state="unfed"],.hud[data-state="severed"]{opacity:.45}
