@@ -1,2 +1,38 @@
-<!-- slots widget: replaced by its build ticket -->
-<div class="hud hud-slots"></div>
+<!-- Slots widget: variant A "Ledger" from wayfinder #6. Content is set once;
+     the list is a fixed pool of 16 rows in feed (Race) order flipped by bound keys
+     from lib/slots.lua's keys() — a Slot past the pool shows only as "+N more".
+     Defaults are the Unfed skeleton: every row hidden, the "No slots" line too. -->
+<style>
+  /* a Race can outgrow the widget: scroll the ledger rather than clip it */
+  html,body{height:100%}
+  .hud{display:flex;flex-direction:column;gap:1px;padding:2px 4px 2px 0;height:100%;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#30363d transparent}
+  .s,.empty{flex-shrink:0}
+  .s{display:grid;grid-template-columns:64px 1fr;gap:6px;align-items:baseline;line-height:1.2}
+  .s .l{color:var(--l);font-size:12px;white-space:nowrap}
+  .s .i{color:var(--i);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* slot occupancy: 1 = empty, dimmed, an em dash for the item (drawn here: bound
+     text reaches the page as Latin-1 bytes, so it must stay ASCII) */
+  [data-empty="1"]{--i:#4b5563;--l:#4b5563}[data-empty="0"]{--i:#c9d1d9;--l:#8b949e}
+  .s[data-empty="1"] .i::before{content:"\2014"}
+  .empty{color:#6e7681;font-size:12px;font-style:italic}
+</style>
+<div class="hud hud-slots" data-state="unfed" data-mud-bind-attr="data-state:hudState">
+  <div class="empty" style="display:none" data-mud-bind-style="display:slotsEmpty">No slots</div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s1e" data-mud-bind-style="display:s1d"><span class="l" data-mud-bind="s1l"></span><span class="i" data-mud-bind="s1i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s2e" data-mud-bind-style="display:s2d"><span class="l" data-mud-bind="s2l"></span><span class="i" data-mud-bind="s2i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s3e" data-mud-bind-style="display:s3d"><span class="l" data-mud-bind="s3l"></span><span class="i" data-mud-bind="s3i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s4e" data-mud-bind-style="display:s4d"><span class="l" data-mud-bind="s4l"></span><span class="i" data-mud-bind="s4i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s5e" data-mud-bind-style="display:s5d"><span class="l" data-mud-bind="s5l"></span><span class="i" data-mud-bind="s5i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s6e" data-mud-bind-style="display:s6d"><span class="l" data-mud-bind="s6l"></span><span class="i" data-mud-bind="s6i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s7e" data-mud-bind-style="display:s7d"><span class="l" data-mud-bind="s7l"></span><span class="i" data-mud-bind="s7i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s8e" data-mud-bind-style="display:s8d"><span class="l" data-mud-bind="s8l"></span><span class="i" data-mud-bind="s8i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s9e" data-mud-bind-style="display:s9d"><span class="l" data-mud-bind="s9l"></span><span class="i" data-mud-bind="s9i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s10e" data-mud-bind-style="display:s10d"><span class="l" data-mud-bind="s10l"></span><span class="i" data-mud-bind="s10i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s11e" data-mud-bind-style="display:s11d"><span class="l" data-mud-bind="s11l"></span><span class="i" data-mud-bind="s11i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s12e" data-mud-bind-style="display:s12d"><span class="l" data-mud-bind="s12l"></span><span class="i" data-mud-bind="s12i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s13e" data-mud-bind-style="display:s13d"><span class="l" data-mud-bind="s13l"></span><span class="i" data-mud-bind="s13i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s14e" data-mud-bind-style="display:s14d"><span class="l" data-mud-bind="s14l"></span><span class="i" data-mud-bind="s14i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s15e" data-mud-bind-style="display:s15d"><span class="l" data-mud-bind="s15l"></span><span class="i" data-mud-bind="s15i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s16e" data-mud-bind-style="display:s16d"><span class="l" data-mud-bind="s16l"></span><span class="i" data-mud-bind="s16i"></span></div>
+  <div class="empty" data-mud-bind="slotsMore"></div>
+</div>

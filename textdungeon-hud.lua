@@ -328,6 +328,78 @@ end
 return M
 end)()
 
+-- lib/slots.lua
+__libs["slots"] = (function()
+  local require = __require
+-- Slots: the view-model behind the Slots widget (every worn and held Slot
+-- of the character's Race as a ledger, `label | item`, empties dimmed with a
+-- dash the markup draws from the empty flag; bound text is ASCII only, since
+-- MudForge's Lua-to-JS bridge shows a UTF-8 string's bytes as Latin-1).
+-- Pure Lua 5.1 library, same shape as status.lua: the wiring owns a state
+-- table from `new()`, feeds it Char.Items snapshots, and pushes `keys()`
+-- through setBoundValues. No Countdown here, so no clock and no tick; the
+-- markup is a fixed pool of POOL rows flipped by bound values, never rebuilt
+-- (wayfinder #6). Order is the Feed's, which is the Race's (wayfinder #4).
+local M = {}
+
+M.POOL = 16                -- rows in the markup; beyond that only "+N more"
+
+function M.new()
+  return { state = "unfed", slots = {} }
+end
+
+-- Char.Items snapshot: `{ slots = { {slot, instance, item|null}, ... } }`.
+-- Walks the array with ipairs (feed arrays reach Lua 0-based under t[i]) and
+-- keeps only what the ledger shows; `instance` is dropped. A Race with no
+-- Slots is an empty list, which is still Live.
+function M.items(s, pkg)
+  if pkg == nil then return s end
+  local list = {}
+  for _, e in ipairs(pkg.slots or {}) do
+    if e.slot ~= nil then
+      list[#list + 1] = { label = e.slot, item = e.item }
+    end
+  end
+  s.slots = list
+  s.state = "live"
+  return s
+end
+
+-- Connection lost: keep the last-known ledger, only the state changes.
+function M.sever(s)
+  if s.state == "live" then s.state = "severed" end
+  return s
+end
+
+-- The complete bound-value key set for the Slots widget's markup:
+-- hudState, slotsEmpty, slotsMore, and s<i>l / s<i>i / s<i>e / s<i>d
+-- (label, item, empty flag, row display) for each pool row.
+function M.keys(s)
+  local k = { hudState = s.state }
+  local n = #s.slots
+  k.slotsEmpty = (s.state ~= "unfed" and n == 0) and "" or "none"
+  k.slotsMore = (n > M.POOL) and ("+" .. (n - M.POOL) .. " more") or ""
+  for i = 1, M.POOL do
+    local p = "s" .. i
+    local e = s.slots[i]
+    if e ~= nil then
+      k[p .. "l"] = e.label
+      k[p .. "i"] = e.item ~= nil and e.item or ""
+      k[p .. "e"] = (e.item == nil) and 1 or 0
+      k[p .. "d"] = ""
+    else
+      k[p .. "l"] = ""
+      k[p .. "i"] = ""
+      k[p .. "e"] = 1
+      k[p .. "d"] = "none"
+    end
+  end
+  return k
+end
+
+return M
+end)()
+
 -- src/widgets/*.html, each with shared.css inlined
 __libs["widgets"] = {
   ["status"] = [==[
@@ -475,8 +547,44 @@ html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25
 /* Countdown urgency (Effects): 0 normal, 1 under 5 s */
 [data-urg="0"]{--u:#58a6ff}[data-urg="1"]{--u:#e5232b}
 </style>
-<!-- slots widget: replaced by its build ticket -->
-<div class="hud hud-slots"></div>
+<!-- Slots widget: variant A "Ledger" from wayfinder #6. Content is set once;
+     the list is a fixed pool of 16 rows in feed (Race) order flipped by bound keys
+     from lib/slots.lua's keys() — a Slot past the pool shows only as "+N more".
+     Defaults are the Unfed skeleton: every row hidden, the "No slots" line too. -->
+<style>
+  /* a Race can outgrow the widget: scroll the ledger rather than clip it */
+  html,body{height:100%}
+  .hud{display:flex;flex-direction:column;gap:1px;padding:2px 4px 2px 0;height:100%;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#30363d transparent}
+  .s,.empty{flex-shrink:0}
+  .s{display:grid;grid-template-columns:64px 1fr;gap:6px;align-items:baseline;line-height:1.2}
+  .s .l{color:var(--l);font-size:12px;white-space:nowrap}
+  .s .i{color:var(--i);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* slot occupancy: 1 = empty, dimmed, an em dash for the item (drawn here: bound
+     text reaches the page as Latin-1 bytes, so it must stay ASCII) */
+  [data-empty="1"]{--i:#4b5563;--l:#4b5563}[data-empty="0"]{--i:#c9d1d9;--l:#8b949e}
+  .s[data-empty="1"] .i::before{content:"\2014"}
+  .empty{color:#6e7681;font-size:12px;font-style:italic}
+</style>
+<div class="hud hud-slots" data-state="unfed" data-mud-bind-attr="data-state:hudState">
+  <div class="empty" style="display:none" data-mud-bind-style="display:slotsEmpty">No slots</div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s1e" data-mud-bind-style="display:s1d"><span class="l" data-mud-bind="s1l"></span><span class="i" data-mud-bind="s1i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s2e" data-mud-bind-style="display:s2d"><span class="l" data-mud-bind="s2l"></span><span class="i" data-mud-bind="s2i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s3e" data-mud-bind-style="display:s3d"><span class="l" data-mud-bind="s3l"></span><span class="i" data-mud-bind="s3i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s4e" data-mud-bind-style="display:s4d"><span class="l" data-mud-bind="s4l"></span><span class="i" data-mud-bind="s4i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s5e" data-mud-bind-style="display:s5d"><span class="l" data-mud-bind="s5l"></span><span class="i" data-mud-bind="s5i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s6e" data-mud-bind-style="display:s6d"><span class="l" data-mud-bind="s6l"></span><span class="i" data-mud-bind="s6i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s7e" data-mud-bind-style="display:s7d"><span class="l" data-mud-bind="s7l"></span><span class="i" data-mud-bind="s7i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s8e" data-mud-bind-style="display:s8d"><span class="l" data-mud-bind="s8l"></span><span class="i" data-mud-bind="s8i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s9e" data-mud-bind-style="display:s9d"><span class="l" data-mud-bind="s9l"></span><span class="i" data-mud-bind="s9i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s10e" data-mud-bind-style="display:s10d"><span class="l" data-mud-bind="s10l"></span><span class="i" data-mud-bind="s10i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s11e" data-mud-bind-style="display:s11d"><span class="l" data-mud-bind="s11l"></span><span class="i" data-mud-bind="s11i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s12e" data-mud-bind-style="display:s12d"><span class="l" data-mud-bind="s12l"></span><span class="i" data-mud-bind="s12i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s13e" data-mud-bind-style="display:s13d"><span class="l" data-mud-bind="s13l"></span><span class="i" data-mud-bind="s13i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s14e" data-mud-bind-style="display:s14d"><span class="l" data-mud-bind="s14l"></span><span class="i" data-mud-bind="s14i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s15e" data-mud-bind-style="display:s15d"><span class="l" data-mud-bind="s15l"></span><span class="i" data-mud-bind="s15i"></span></div>
+  <div class="s" style="display:none" data-mud-bind-attr="data-empty:s16e" data-mud-bind-style="display:s16d"><span class="l" data-mud-bind="s16l"></span><span class="i" data-mud-bind="s16i"></span></div>
+  <div class="empty" data-mud-bind="slotsMore"></div>
+</div>
 ]==],
 }
 
@@ -489,6 +597,7 @@ local require = __require
 
 local status = require("status")
 local effects = require("effects")
+local slots = require("slots")
 local widgets = require("widgets")   -- { status = html, effects = html, slots = html }, built from src/widgets/
 
 -- One top-anchored column on the right edge (wayfinder #14): Status / Effects /
@@ -498,6 +607,7 @@ local COLUMN = { width = 240, edge = 12, gap = 12 }
 local ORDER = {
   { name = "status", title = "Status", height = 176 },
   { name = "effects", title = "Effects", height = 164 },   -- five timer rows before scrolling
+  { name = "slots", title = "Slots", height = 256 },       -- the villager's twelve rows before scrolling
 }
 
 local TICK_MS = 100       -- the shared Countdown tick
@@ -506,6 +616,7 @@ local REPUSH_MS = 750     -- bound values pushed right after content is set are 
 local hud = {
   status = { id = nil, s = status.new() },
   effects = { id = nil, s = effects.new() },
+  slots = { id = nil, s = slots.new() },
 }
 local tick = nil
 local repushDue = false   -- one re-push owed after init set the content
@@ -539,10 +650,16 @@ local function pushEffects(now)
   setBoundValues(hud.effects.id, effects.keys(hud.effects.s, now))
 end
 
+-- Slots has no Countdown, so it takes no clock and never rides the tick.
+local function pushSlots()
+  setBoundValues(hud.slots.id, slots.keys(hud.slots.s))
+end
+
 local function pushAll()
   local now = getCurrentTime()
   pushStatus(now)
   pushEffects(now)
+  pushSlots()
 end
 
 -- Each widget is pushed on every tick while it has a Countdown running,
@@ -582,6 +699,7 @@ end
 local function attach()
   hud.status.s = status.new()
   hud.effects.s = effects.new()
+  hud.slots.s = slots.new()
   pushAll()
   stopTick()
 end
@@ -606,6 +724,11 @@ function init()
     effects.effects(hud.effects.s, pkg, now)
     pushEffects(now)
   end)
+  onGMCPUpdate("Char.Items", function(pkg)
+    ensureTick()
+    slots.items(hud.slots.s, pkg)
+    pushSlots()
+  end)
 
   attach()
   repushDue = true
@@ -625,6 +748,7 @@ function onDisconnect()
   local now = getCurrentTime()
   status.sever(hud.status.s, now)
   effects.sever(hud.effects.s, now)
+  slots.sever(hud.slots.s)
   pushAll()
   stopTick()
 end

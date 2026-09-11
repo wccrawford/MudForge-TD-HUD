@@ -12,6 +12,7 @@ plugin = {
 
 local status = require("status")
 local effects = require("effects")
+local slots = require("slots")
 local widgets = require("widgets")   -- { status = html, effects = html, slots = html }, built from src/widgets/
 
 -- One top-anchored column on the right edge (wayfinder #14): Status / Effects /
@@ -21,6 +22,7 @@ local COLUMN = { width = 240, edge = 12, gap = 12 }
 local ORDER = {
   { name = "status", title = "Status", height = 176 },
   { name = "effects", title = "Effects", height = 164 },   -- five timer rows before scrolling
+  { name = "slots", title = "Slots", height = 256 },       -- the villager's twelve rows before scrolling
 }
 
 local TICK_MS = 100       -- the shared Countdown tick
@@ -29,6 +31,7 @@ local REPUSH_MS = 750     -- bound values pushed right after content is set are 
 local hud = {
   status = { id = nil, s = status.new() },
   effects = { id = nil, s = effects.new() },
+  slots = { id = nil, s = slots.new() },
 }
 local tick = nil
 local repushDue = false   -- one re-push owed after init set the content
@@ -62,10 +65,16 @@ local function pushEffects(now)
   setBoundValues(hud.effects.id, effects.keys(hud.effects.s, now))
 end
 
+-- Slots has no Countdown, so it takes no clock and never rides the tick.
+local function pushSlots()
+  setBoundValues(hud.slots.id, slots.keys(hud.slots.s))
+end
+
 local function pushAll()
   local now = getCurrentTime()
   pushStatus(now)
   pushEffects(now)
+  pushSlots()
 end
 
 -- Each widget is pushed on every tick while it has a Countdown running,
@@ -105,6 +114,7 @@ end
 local function attach()
   hud.status.s = status.new()
   hud.effects.s = effects.new()
+  hud.slots.s = slots.new()
   pushAll()
   stopTick()
 end
@@ -129,6 +139,11 @@ function init()
     effects.effects(hud.effects.s, pkg, now)
     pushEffects(now)
   end)
+  onGMCPUpdate("Char.Items", function(pkg)
+    ensureTick()
+    slots.items(hud.slots.s, pkg)
+    pushSlots()
+  end)
 
   attach()
   repushDue = true
@@ -148,6 +163,7 @@ function onDisconnect()
   local now = getCurrentTime()
   status.sever(hud.status.s, now)
   effects.sever(hud.effects.s, now)
+  slots.sever(hud.slots.s)
   pushAll()
   stopTick()
 end
