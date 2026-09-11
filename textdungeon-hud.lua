@@ -318,6 +318,7 @@ local hud = {
   status = { id = nil, s = status.new() },
 }
 local tick = nil
+local repushDue = false   -- one re-push owed after init set the content
 
 -- Create every widget in ORDER down the column. MudForge's saved placement
 -- overrides these positions on later loads, so this only decides first install.
@@ -362,22 +363,25 @@ local function stopTick()
   tick = nil
 end
 
--- addTimer answers "" while MudForge considers the session disconnected, and
--- onConnect fires before it stops doing so; every feed push proves the
--- connection is up, so the tick is (re)started from there until it takes.
+-- addTimer answers "" (and warns in the terminal) while MudForge considers
+-- the session disconnected, and onConnect fires before it stops doing so.
+-- Every feed push proves the session is up, so all timers start from the
+-- feed handlers: the tick until it takes, and the one re-push owed after init.
 local function ensureTick()
   if tick ~= nil and tick ~= "" then return end
   tick = addTimer(TICK_MS, onTick, true)
+  if tick ~= "" and repushDue then
+    repushDue = false
+    addTimer(REPUSH_MS, pushAll, false)
+  end
 end
 
 -- The attach routine (wayfinder #9), shared by init and onConnect: reset every
--- widget to Unfed and start the tick. Timers silently no-op while
--- disconnected; onConnect runs this again.
+-- widget to Unfed; the tick follows with the first feed push.
 local function attach()
   hud.status.s = status.new()
   pushAll()
   stopTick()
-  ensureTick()
 end
 
 function init()
@@ -396,13 +400,13 @@ function init()
   end)
 
   attach()
+  repushDue = true
   -- A hot-reload mid-session gets no feed until the server is asked; any
   -- Core.Hello makes TextDungeonC re-send every package with a fresh now_ms.
   -- A real connect already gets that from the server's own DO GMCP re-push,
   -- so this is sent here only, not from onConnect (MudForge echoes every
   -- sendGMCP into the terminal).
   sendGMCP("Core.Hello", { client = plugin.id, version = plugin.version })
-  addTimer(REPUSH_MS, pushAll, false)
 end
 
 function onConnect()
