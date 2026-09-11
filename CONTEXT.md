@@ -29,3 +29,17 @@ _Avoid_: expire, finish, lapse (the server's word for the same instant, seen fro
 **Span**:
 The full length a draining bar represents. For Round Time it is the remaining at the latest Stack; for an Effect it is the longest remaining ever seen for that name.
 _Avoid_: total, max, duration
+
+### Widget states
+
+**Unfed**:
+A widget that has received no Feed snapshot on the current connection — whether the world is not yet connected or the player is still at the login prompts. Shows its skeleton with empty values.
+_Avoid_: empty, initial, loading
+
+**Live**:
+A widget that has received a Feed snapshot on the current connection and is still connected; its values and Countdowns are the server's.
+_Avoid_: active, online
+
+**Severed**:
+A widget whose connection was lost while Live; it keeps the last-known values, Countdowns frozen where they stood, until the next connection returns it to Unfed.
+_Avoid_: stale, offline, disconnected (the connection's state, not the widget's)
