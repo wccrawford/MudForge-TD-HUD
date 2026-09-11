@@ -11,6 +11,7 @@ plugin = {
 }
 
 local status = require("status")
+local effects = require("effects")
 local widgets = require("widgets")   -- { status = html, effects = html, slots = html }, built from src/widgets/
 
 -- One top-anchored column on the right edge (wayfinder #14): Status / Effects /
@@ -19,6 +20,7 @@ local widgets = require("widgets")   -- { status = html, effects = html, slots =
 local COLUMN = { width = 240, edge = 12, gap = 12 }
 local ORDER = {
   { name = "status", title = "Status", height = 176 },
+  { name = "effects", title = "Effects", height = 164 },   -- five timer rows before scrolling
 }
 
 local TICK_MS = 100       -- the shared Countdown tick
@@ -26,6 +28,7 @@ local REPUSH_MS = 750     -- bound values pushed right after content is set are 
 
 local hud = {
   status = { id = nil, s = status.new() },
+  effects = { id = nil, s = effects.new() },
 }
 local tick = nil
 local repushDue = false   -- one re-push owed after init set the content
@@ -55,17 +58,28 @@ local function pushStatus(now)
   setBoundValues(hud.status.id, status.keys(hud.status.s, now))
 end
 
+local function pushEffects(now)
+  setBoundValues(hud.effects.id, effects.keys(hud.effects.s, now))
+end
+
 local function pushAll()
   local now = getCurrentTime()
   pushStatus(now)
+  pushEffects(now)
 end
 
+-- Each widget is pushed on every tick while it has a Countdown running,
+-- including the tick that reaches Clear.
 local function onTick()
   local now = getCurrentTime()
   local s = hud.status.s
   local counting = s.rt ~= nil
   status.tick(s, now)
-  if counting then pushStatus(now) end   -- includes the tick that reaches Clear
+  if counting then pushStatus(now) end
+  local e = hud.effects.s
+  counting = effects.counting(e)
+  effects.tick(e, now)
+  if counting then pushEffects(now) end
 end
 
 local function stopTick()
@@ -90,6 +104,7 @@ end
 -- widget to Unfed; the tick follows with the first feed push.
 local function attach()
   hud.status.s = status.new()
+  hud.effects.s = effects.new()
   pushAll()
   stopTick()
 end
@@ -107,6 +122,12 @@ function init()
     local now = getCurrentTime()
     status.roundtime(hud.status.s, pkg, now)
     pushStatus(now)
+  end)
+  onGMCPUpdate("Char.Effects", function(pkg)
+    ensureTick()
+    local now = getCurrentTime()
+    effects.effects(hud.effects.s, pkg, now)
+    pushEffects(now)
   end)
 
   attach()
@@ -126,6 +147,7 @@ end
 function onDisconnect()
   local now = getCurrentTime()
   status.sever(hud.status.s, now)
-  pushStatus(now)
+  effects.sever(hud.effects.s, now)
+  pushAll()
   stopTick()
 end

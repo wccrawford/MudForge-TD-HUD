@@ -206,6 +206,128 @@ end
 return M
 end)()
 
+-- lib/effects.lua
+__libs["effects"] = (function()
+  local require = __require
+-- Effects: the view-model behind the Effects widget (Active Effects as timer
+-- rows, soonest first). Pure Lua 5.1 library, same shape as status.lua: the
+-- wiring owns a state table from `new()`, feeds it Char.Effects snapshots and
+-- the local clock, and pushes `keys()` through setBoundValues. Each effect
+-- runs its own Countdown (CONTEXT.md); the markup is a fixed pool of POOL
+-- rows flipped by bound values, never rebuilt (wayfinder #6).
+local countdown = require("countdown")
+
+local M = {}
+
+M.POOL = 10                -- rows in the markup; beyond that only "+N more"
+M.URGENT_MS = 5000         -- time and hairline turn red under this
+
+function M.new()
+  return { state = "unfed", by_name = {}, frozen_at = nil }
+end
+
+-- Char.Effects snapshot: `{ effects = { {name, ends_at_ms}, ... }, now_ms }`.
+-- Walks the array with ipairs (feed arrays reach Lua 0-based under t[i]).
+-- An Effect's Span is the longest remaining ever seen for its name while it
+-- ran, so a re-push that lengthens it beyond the dead-band refills toward
+-- that, not to the new remaining as a Round Time Stack would.
+function M.effects(s, pkg, now)
+  if pkg == nil then return s end
+  local next_by_name = {}
+  local now_ms = pkg.now_ms or 0
+  for _, e in ipairs(pkg.effects or {}) do
+    if e.name ~= nil and e.ends_at_ms ~= nil then
+      local prev = s.by_name[e.name]
+      local cd = countdown.push(prev, e.ends_at_ms - now_ms, now)
+      if cd ~= nil and prev ~= nil and cd ~= prev and prev.span > cd.span then
+        cd = { ends_at = cd.ends_at, span = prev.span }
+      end
+      if cd ~= nil then next_by_name[e.name] = cd end
+    end
+  end
+  s.by_name = next_by_name
+  s.state = "live"
+  return s
+end
+
+-- The local tick; returns true when any Effect just reached Clear so the
+-- caller knows its row must be pushed away.
+function M.tick(s, now)
+  if s.state == "severed" then return false end
+  local cleared = false
+  for name, cd in pairs(s.by_name) do
+    if countdown.tick(cd, now) == nil then
+      s.by_name[name] = nil
+      cleared = true
+    end
+  end
+  return cleared
+end
+
+-- True while any Effect is running, i.e. the tick has rows to drain.
+-- (`next` is not in MudForge's sandbox; pairs is.)
+function M.counting(s)
+  for _ in pairs(s.by_name) do return true end
+  return false
+end
+
+-- Connection lost: keep the rows, freeze every Countdown here.
+function M.sever(s, now)
+  if s.state == "live" then
+    s.state = "severed"
+    s.frozen_at = now
+  end
+  return s
+end
+
+-- Running Effects soonest first (name breaks ties so the order is stable).
+local function sorted(s, now)
+  local list = {}
+  for name, cd in pairs(s.by_name) do
+    if countdown.tick(cd, now) ~= nil then
+      list[#list + 1] = { name = name, cd = cd }
+    end
+  end
+  table.sort(list, function(a, b)
+    if a.cd.ends_at ~= b.cd.ends_at then return a.cd.ends_at < b.cd.ends_at end
+    return a.name < b.name
+  end)
+  return list
+end
+
+-- The complete bound-value key set for the Effects widget's markup:
+-- hudState, effEmpty, effMore, and e<i>n / e<i>t / e<i>u / e<i>p / e<i>d
+-- (name, mm:ss, urgency flag, hairline width, row display) for each pool row.
+function M.keys(s, now)
+  if s.state == "severed" and s.frozen_at ~= nil then now = s.frozen_at end
+  local k = { hudState = s.state }
+  local list = sorted(s, now)
+  k.effEmpty = (s.state ~= "unfed" and #list == 0) and "" or "none"
+  k.effMore = (#list > M.POOL) and ("+" .. (#list - M.POOL) .. " more") or ""
+  for i = 1, M.POOL do
+    local p = "e" .. i
+    local e = list[i]
+    if e ~= nil then
+      local left = countdown.remaining(e.cd, now)
+      k[p .. "n"] = e.name
+      k[p .. "t"] = countdown.mmss(countdown.seconds(e.cd, now))
+      k[p .. "u"] = (left < M.URGENT_MS) and 1 or 0
+      k[p .. "p"] = countdown.pct(e.cd, now) .. "%"
+      k[p .. "d"] = ""
+    else
+      k[p .. "n"] = ""
+      k[p .. "t"] = ""
+      k[p .. "u"] = 0
+      k[p .. "p"] = "0%"
+      k[p .. "d"] = "none"
+    end
+  end
+  return k
+end
+
+return M
+end)()
+
 -- src/widgets/*.html, each with shared.css inlined
 __libs["widgets"] = {
   ["status"] = [==[
@@ -221,6 +343,8 @@ html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25
 /* widget states (CONTEXT.md): Unfed and Severed share one dimmed treatment; Live is full strength */
 .hud{transition:opacity .2s}
 .hud[data-state="unfed"],.hud[data-state="severed"]{opacity:.45}
+/* Countdown urgency (Effects): 0 normal, 1 under 5 s */
+[data-urg="0"]{--u:#58a6ff}[data-urg="1"]{--u:#e5232b}
 </style>
 <!-- Status widget: variant A "Stacked meters" from wayfinder #5. Content is set once;
      every value below is a bound key from lib/status.lua's keys(). Defaults are the
@@ -270,9 +394,70 @@ html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25
 /* widget states (CONTEXT.md): Unfed and Severed share one dimmed treatment; Live is full strength */
 .hud{transition:opacity .2s}
 .hud[data-state="unfed"],.hud[data-state="severed"]{opacity:.45}
+/* Countdown urgency (Effects): 0 normal, 1 under 5 s */
+[data-urg="0"]{--u:#58a6ff}[data-urg="1"]{--u:#e5232b}
 </style>
-<!-- effects widget: replaced by its build ticket -->
-<div class="hud hud-effects"></div>
+<!-- Effects widget: variant A "Timer rows" from wayfinder #6. Content is set once;
+     the list is a fixed pool of 10 rows flipped by bound keys from lib/effects.lua's
+     keys() — a row past the pool shows only as "+N more". Defaults are the Unfed
+     skeleton: every row hidden, the "No effects" line too. -->
+<style>
+  /* the pool can outgrow the widget: scroll it rather than clip "+N more" */
+  html,body{height:100%}
+  .hud{display:flex;flex-direction:column;gap:5px;padding:2px 4px 2px 0;height:100%;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#30363d transparent}
+  .e,.empty{flex-shrink:0}
+  .e{display:flex;flex-direction:column;gap:2px}
+  .e .l{display:grid;grid-template-columns:1fr auto;align-items:baseline;gap:8px}
+  .e .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .e .t{color:var(--u);font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
+  .e .h{height:3px;background:#30363d;border-radius:2px;overflow:hidden}
+  .e .h div{height:100%;background:var(--u);transition:width .1s linear}
+  .empty{color:#6e7681;font-size:12px;font-style:italic}
+</style>
+<div class="hud hud-effects" data-state="unfed" data-mud-bind-attr="data-state:hudState">
+  <div class="empty" style="display:none" data-mud-bind-style="display:effEmpty">No effects</div>
+  <div class="e" style="display:none" data-mud-bind-attr="data-urg:e1u" data-mud-bind-style="display:e1d">
+    <div class="l"><span class="n" data-mud-bind="e1n"></span><span class="t" data-mud-bind="e1t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e1p"></div></div>
+  </div>
+  <div class="e" style="display:none" data-mud-bind-attr="data-urg:e2u" data-mud-bind-style="display:e2d">
+    <div class="l"><span class="n" data-mud-bind="e2n"></span><span class="t" data-mud-bind="e2t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e2p"></div></div>
+  </div>
+  <div class="e" style="display:none" data-mud-bind-attr="data-urg:e3u" data-mud-bind-style="display:e3d">
+    <div class="l"><span class="n" data-mud-bind="e3n"></span><span class="t" data-mud-bind="e3t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e3p"></div></div>
+  </div>
+  <div class="e" style="display:none" data-mud-bind-attr="data-urg:e4u" data-mud-bind-style="display:e4d">
+    <div class="l"><span class="n" data-mud-bind="e4n"></span><span class="t" data-mud-bind="e4t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e4p"></div></div>
+  </div>
+  <div class="e" style="display:none" data-mud-bind-attr="data-urg:e5u" data-mud-bind-style="display:e5d">
+    <div class="l"><span class="n" data-mud-bind="e5n"></span><span class="t" data-mud-bind="e5t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e5p"></div></div>
+  </div>
+  <div class="e" style="display:none" data-mud-bind-attr="data-urg:e6u" data-mud-bind-style="display:e6d">
+    <div class="l"><span class="n" data-mud-bind="e6n"></span><span class="t" data-mud-bind="e6t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e6p"></div></div>
+  </div>
+  <div class="e" style="display:none" data-mud-bind-attr="data-urg:e7u" data-mud-bind-style="display:e7d">
+    <div class="l"><span class="n" data-mud-bind="e7n"></span><span class="t" data-mud-bind="e7t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e7p"></div></div>
+  </div>
+  <div class="e" style="display:none" data-mud-bind-attr="data-urg:e8u" data-mud-bind-style="display:e8d">
+    <div class="l"><span class="n" data-mud-bind="e8n"></span><span class="t" data-mud-bind="e8t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e8p"></div></div>
+  </div>
+  <div class="e" style="display:none" data-mud-bind-attr="data-urg:e9u" data-mud-bind-style="display:e9d">
+    <div class="l"><span class="n" data-mud-bind="e9n"></span><span class="t" data-mud-bind="e9t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e9p"></div></div>
+  </div>
+  <div class="e" style="display:none" data-mud-bind-attr="data-urg:e10u" data-mud-bind-style="display:e10d">
+    <div class="l"><span class="n" data-mud-bind="e10n"></span><span class="t" data-mud-bind="e10t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e10p"></div></div>
+  </div>
+  <div class="empty" data-mud-bind="effMore"></div>
+</div>
 ]==],
   ["slots"] = [==[
 <style>
@@ -287,6 +472,8 @@ html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25
 /* widget states (CONTEXT.md): Unfed and Severed share one dimmed treatment; Live is full strength */
 .hud{transition:opacity .2s}
 .hud[data-state="unfed"],.hud[data-state="severed"]{opacity:.45}
+/* Countdown urgency (Effects): 0 normal, 1 under 5 s */
+[data-urg="0"]{--u:#58a6ff}[data-urg="1"]{--u:#e5232b}
 </style>
 <!-- slots widget: replaced by its build ticket -->
 <div class="hud hud-slots"></div>
@@ -301,6 +488,7 @@ local require = __require
 -- the built textdungeon-hud.lua at the repo root (ADR 0001).
 
 local status = require("status")
+local effects = require("effects")
 local widgets = require("widgets")   -- { status = html, effects = html, slots = html }, built from src/widgets/
 
 -- One top-anchored column on the right edge (wayfinder #14): Status / Effects /
@@ -309,6 +497,7 @@ local widgets = require("widgets")   -- { status = html, effects = html, slots =
 local COLUMN = { width = 240, edge = 12, gap = 12 }
 local ORDER = {
   { name = "status", title = "Status", height = 176 },
+  { name = "effects", title = "Effects", height = 164 },   -- five timer rows before scrolling
 }
 
 local TICK_MS = 100       -- the shared Countdown tick
@@ -316,6 +505,7 @@ local REPUSH_MS = 750     -- bound values pushed right after content is set are 
 
 local hud = {
   status = { id = nil, s = status.new() },
+  effects = { id = nil, s = effects.new() },
 }
 local tick = nil
 local repushDue = false   -- one re-push owed after init set the content
@@ -345,17 +535,28 @@ local function pushStatus(now)
   setBoundValues(hud.status.id, status.keys(hud.status.s, now))
 end
 
+local function pushEffects(now)
+  setBoundValues(hud.effects.id, effects.keys(hud.effects.s, now))
+end
+
 local function pushAll()
   local now = getCurrentTime()
   pushStatus(now)
+  pushEffects(now)
 end
 
+-- Each widget is pushed on every tick while it has a Countdown running,
+-- including the tick that reaches Clear.
 local function onTick()
   local now = getCurrentTime()
   local s = hud.status.s
   local counting = s.rt ~= nil
   status.tick(s, now)
-  if counting then pushStatus(now) end   -- includes the tick that reaches Clear
+  if counting then pushStatus(now) end
+  local e = hud.effects.s
+  counting = effects.counting(e)
+  effects.tick(e, now)
+  if counting then pushEffects(now) end
 end
 
 local function stopTick()
@@ -380,6 +581,7 @@ end
 -- widget to Unfed; the tick follows with the first feed push.
 local function attach()
   hud.status.s = status.new()
+  hud.effects.s = effects.new()
   pushAll()
   stopTick()
 end
@@ -397,6 +599,12 @@ function init()
     local now = getCurrentTime()
     status.roundtime(hud.status.s, pkg, now)
     pushStatus(now)
+  end)
+  onGMCPUpdate("Char.Effects", function(pkg)
+    ensureTick()
+    local now = getCurrentTime()
+    effects.effects(hud.effects.s, pkg, now)
+    pushEffects(now)
   end)
 
   attach()
@@ -416,6 +624,7 @@ end
 function onDisconnect()
   local now = getCurrentTime()
   status.sever(hud.status.s, now)
-  pushStatus(now)
+  effects.sever(hud.effects.s, now)
+  pushAll()
   stopTick()
 end

@@ -1,2 +1,61 @@
-<!-- effects widget: replaced by its build ticket -->
-<div class="hud hud-effects"></div>
+<!-- Effects widget: variant A "Timer rows" from wayfinder #6. Content is set once;
+     the list is a fixed pool of 10 rows flipped by bound keys from lib/effects.lua's
+     keys() — a row past the pool shows only as "+N more". Defaults are the Unfed
+     skeleton: every row hidden, the "No effects" line too. -->
+<style>
+  /* the pool can outgrow the widget: scroll it rather than clip "+N more" */
+  html,body{height:100%}
+  .hud{display:flex;flex-direction:column;gap:5px;padding:2px 4px 2px 0;height:100%;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#30363d transparent}
+  .e,.empty{flex-shrink:0}
+  .e{display:flex;flex-direction:column;gap:2px}
+  .e .l{display:grid;grid-template-columns:1fr auto;align-items:baseline;gap:8px}
+  .e .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .e .t{color:var(--u);font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
+  .e .h{height:3px;background:#30363d;border-radius:2px;overflow:hidden}
+  .e .h div{height:100%;background:var(--u);transition:width .1s linear}
+  .empty{color:#6e7681;font-size:12px;font-style:italic}
+</style>
+<div class="hud hud-effects" data-state="unfed" data-mud-bind-attr="data-state:hudState">
+  <div class="empty" style="display:none" data-mud-bind-style="display:effEmpty">No effects</div>
+  <div class="e" style="display:none" data-mud-bind-attr="data-urg:e1u" data-mud-bind-style="display:e1d">
+    <div class="l"><span class="n" data-mud-bind="e1n"></span><span class="t" data-mud-bind="e1t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e1p"></div></div>
+  </div>
+  <div class="e" style="display:none" data-mud-bind-attr="data-urg:e2u" data-mud-bind-style="display:e2d">
+    <div class="l"><span class="n" data-mud-bind="e2n"></span><span class="t" data-mud-bind="e2t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e2p"></div></div>
+  </div>
+  <div class="e" style="display:none" data-mud-bind-attr="data-urg:e3u" data-mud-bind-style="display:e3d">
+    <div class="l"><span class="n" data-mud-bind="e3n"></span><span class="t" data-mud-bind="e3t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e3p"></div></div>
+  </div>
+  <div class="e" style="display:none" data-mud-bind-attr="data-urg:e4u" data-mud-bind-style="display:e4d">
+    <div class="l"><span class="n" data-mud-bind="e4n"></span><span class="t" data-mud-bind="e4t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e4p"></div></div>
+  </div>
+  <div class="e" style="display:none" data-mud-bind-attr="data-urg:e5u" data-mud-bind-style="display:e5d">
+    <div class="l"><span class="n" data-mud-bind="e5n"></span><span class="t" data-mud-bind="e5t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e5p"></div></div>
+  </div>
+  <div class="e" style="display:none" data-mud-bind-attr="data-urg:e6u" data-mud-bind-style="display:e6d">
+    <div class="l"><span class="n" data-mud-bind="e6n"></span><span class="t" data-mud-bind="e6t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e6p"></div></div>
+  </div>
+  <div class="e" style="display:none" data-mud-bind-attr="data-urg:e7u" data-mud-bind-style="display:e7d">
+    <div class="l"><span class="n" data-mud-bind="e7n"></span><span class="t" data-mud-bind="e7t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e7p"></div></div>
+  </div>
+  <div class="e" style="display:none" data-mud-bind-attr="data-urg:e8u" data-mud-bind-style="display:e8d">
+    <div class="l"><span class="n" data-mud-bind="e8n"></span><span class="t" data-mud-bind="e8t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e8p"></div></div>
+  </div>
+  <div class="e" style="display:none" data-mud-bind-attr="data-urg:e9u" data-mud-bind-style="display:e9d">
+    <div class="l"><span class="n" data-mud-bind="e9n"></span><span class="t" data-mud-bind="e9t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e9p"></div></div>
+  </div>
+  <div class="e" style="display:none" data-mud-bind-attr="data-urg:e10u" data-mud-bind-style="display:e10d">
+    <div class="l"><span class="n" data-mud-bind="e10n"></span><span class="t" data-mud-bind="e10t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e10p"></div></div>
+  </div>
+  <div class="empty" data-mud-bind="effMore"></div>
+</div>
