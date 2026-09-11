@@ -9,7 +9,7 @@ independent.
 
 | Variant | Shape | Default size |
 |---|---|---|
-| **A — Timer rows** | Name left, `mm:ss` right, a hairline under each row draining toward expiry | 240×132 |
+| **A — Timer rows** (**winner**) | Name left, `mm:ss` right, a hairline under each row draining toward expiry | 240×132 |
 | **B — Chips** | Wrapping pills `Name 0:42`, the pill border carries urgency | 240×92 |
 | **C — Ladder** | Time-led: big tabular time in a left column, name beside; soonest on top and brightest | 240×118 |
 
@@ -22,7 +22,7 @@ list is empty. There is no name-only case — the feed research (#4) found
 
 | Variant | Shape | Default size |
 |---|---|---|
-| **A — Ledger** | One row per slot in feed (Race) order, `label │ item`; empties dimmed with a dash | 240×192 |
+| **A — Ledger** (**winner**) | One row per slot in feed (Race) order, `label │ item`; empties dimmed with a dash | 240×192 |
 | **B — Paperdoll** | Tiles anchored to a 3-column body grid by slot label; unknown kinds (Tail, Wing, Horn…) flow into the gaps | 240×150 |
 | **C — Held / Worn** | The hands as two big boxes up top, everything worn as one dense running line | 240×140 |
 
@@ -64,7 +64,20 @@ mounts all six variants as separate widgets (Effects down the left, Slots in
 a second column), bound to live `Char.Effects` and `Char.Items`. Edit
 `preview.html`, rebuild, re-import.
 
-The generated Lua passes the luaparse 5.1 gate (#3). One thing to confirm in
-MudForge that the browser can't: Ladder (Effects C) binds the `class`
-attribute via `data-mud-bind-attr="class:eNc"` — if MudForge blocks that,
-the "top row brighter" emphasis silently disappears.
+The generated Lua passes the luaparse 5.1 gate (#3).
+
+## Verdict (2026-09-11)
+
+**Effects A — Timer rows** and **Slots A — Ledger** win. Ledger because it is
+the only Slots variant that assumes nothing about which slot kinds a Race has.
+Two in-client findings for the build: MudForge's widget `size` includes its
+~30 px title bar (the preview heights came up short), and the 11–12 px text
+reads small beside the stock Status panel — raise the base font.
+
+Two MudForge runtime facts reproduced here, recorded on #6:
+
+1. GMCP arrays reach Lua **0-based** under `t[i]` (`raw[0]=Head raw[1]=Body`,
+   `#` still 12); `ipairs` walks all elements. Never index a feed array.
+2. Bound values pushed straight after `setWidgetProperty(content)` are
+   **lost** (iframe not ready); the 750 ms re-push in the generated Lua
+   fixed it. Re-push after setting content.
