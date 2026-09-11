@@ -1,7 +1,7 @@
 -- Slots: the view-model behind the Slots widget (every worn and held Slot
--- of the character's Race as a ledger, `label | item`, empties dimmed with a
--- dash the markup draws from the empty flag; bound text is ASCII only, since
--- MudForge's Lua-to-JS bridge shows a UTF-8 string's bytes as Latin-1).
+-- of the character's Race as a ledger, `label | item`, empties dimmed with
+-- EMPTY for the item; bound text is ASCII only, since MudForge's Lua-to-JS
+-- bridge shows a UTF-8 string's bytes as Latin-1).
 -- Pure Lua 5.1 library, same shape as status.lua: the wiring owns a state
 -- table from `new()`, feeds it Char.Items snapshots, and pushes `keys()`
 -- through setBoundValues. No Countdown here, so no clock and no tick; the
@@ -10,6 +10,7 @@
 local M = {}
 
 M.POOL = 16                -- rows in the markup; beyond that only "+N more"
+M.EMPTY = "----"           -- stands in for an empty Slot's item
 
 function M.new()
   return { state = "unfed", slots = {} }
@@ -51,7 +52,7 @@ function M.keys(s)
     local e = s.slots[i]
     if e ~= nil then
       k[p .. "l"] = e.label
-      k[p .. "i"] = e.item ~= nil and e.item or ""
+      k[p .. "i"] = e.item ~= nil and e.item or M.EMPTY
       k[p .. "e"] = (e.item == nil) and 1 or 0
       k[p .. "d"] = ""
     else

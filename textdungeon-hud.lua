@@ -332,9 +332,9 @@ end)()
 __libs["slots"] = (function()
   local require = __require
 -- Slots: the view-model behind the Slots widget (every worn and held Slot
--- of the character's Race as a ledger, `label | item`, empties dimmed with a
--- dash the markup draws from the empty flag; bound text is ASCII only, since
--- MudForge's Lua-to-JS bridge shows a UTF-8 string's bytes as Latin-1).
+-- of the character's Race as a ledger, `label | item`, empties dimmed with
+-- EMPTY for the item; bound text is ASCII only, since MudForge's Lua-to-JS
+-- bridge shows a UTF-8 string's bytes as Latin-1).
 -- Pure Lua 5.1 library, same shape as status.lua: the wiring owns a state
 -- table from `new()`, feeds it Char.Items snapshots, and pushes `keys()`
 -- through setBoundValues. No Countdown here, so no clock and no tick; the
@@ -343,6 +343,7 @@ __libs["slots"] = (function()
 local M = {}
 
 M.POOL = 16                -- rows in the markup; beyond that only "+N more"
+M.EMPTY = "----"           -- stands in for an empty Slot's item
 
 function M.new()
   return { state = "unfed", slots = {} }
@@ -384,7 +385,7 @@ function M.keys(s)
     local e = s.slots[i]
     if e ~= nil then
       k[p .. "l"] = e.label
-      k[p .. "i"] = e.item ~= nil and e.item or ""
+      k[p .. "i"] = e.item ~= nil and e.item or M.EMPTY
       k[p .. "e"] = (e.item == nil) and 1 or 0
       k[p .. "d"] = ""
     else
@@ -559,10 +560,8 @@ html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25
   .s{display:grid;grid-template-columns:64px 1fr;gap:6px;align-items:baseline;line-height:1.2}
   .s .l{color:var(--l);font-size:12px;white-space:nowrap}
   .s .i{color:var(--i);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  /* slot occupancy: 1 = empty, dimmed, an em dash for the item (drawn here: bound
-     text reaches the page as Latin-1 bytes, so it must stay ASCII) */
+  /* slot occupancy: 1 = empty (dimmed; the lib supplies the "----" item) */
   [data-empty="1"]{--i:#4b5563;--l:#4b5563}[data-empty="0"]{--i:#c9d1d9;--l:#8b949e}
-  .s[data-empty="1"] .i::before{content:"\2014"}
   .empty{color:#6e7681;font-size:12px;font-style:italic}
 </style>
 <div class="hud hud-slots" data-state="unfed" data-mud-bind-attr="data-state:hudState">
