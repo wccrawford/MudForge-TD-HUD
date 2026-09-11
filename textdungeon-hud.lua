@@ -371,15 +371,13 @@ local function ensureTick()
 end
 
 -- The attach routine (wayfinder #9), shared by init and onConnect: reset every
--- widget to Unfed, start the tick, and ask the server to re-send every package
--- with a fresh now_ms. Timers and sendGMCP silently no-op while disconnected;
--- onConnect runs this again.
+-- widget to Unfed and start the tick. Timers silently no-op while
+-- disconnected; onConnect runs this again.
 local function attach()
   hud.status.s = status.new()
   pushAll()
   stopTick()
   ensureTick()
-  sendGMCP("Core.Hello", { client = plugin.id, version = plugin.version })
 end
 
 function init()
@@ -398,6 +396,12 @@ function init()
   end)
 
   attach()
+  -- A hot-reload mid-session gets no feed until the server is asked; any
+  -- Core.Hello makes TextDungeonC re-send every package with a fresh now_ms.
+  -- A real connect already gets that from the server's own DO GMCP re-push,
+  -- so this is sent here only, not from onConnect (MudForge echoes every
+  -- sendGMCP into the terminal).
+  sendGMCP("Core.Hello", { client = plugin.id, version = plugin.version })
   addTimer(REPUSH_MS, pushAll, false)
 end
 
