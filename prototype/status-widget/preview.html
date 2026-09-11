@@ -31,7 +31,7 @@
   html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:12px/1.25 "Segoe UI",system-ui,sans-serif;overflow:hidden}
   *{box-sizing:border-box}
   /* tier ramp: 1 best … 5 worst (Condition/Footing/Focus); power 1 strongest … 4 slightest */
-  [data-tier="1"]{--c:#3fb950}[data-tier="2"]{--c:#9bc53d}[data-tier="3"]{--c:#e3b341}[data-tier="4"]{--c:#f0883e}[data-tier="5"]{--c:#f85149}
+  [data-tier="1"]{--c:#3fb950}[data-tier="2"]{--c:#d4c33a}[data-tier="3"]{--c:#f0883e}[data-tier="4"]{--c:#f25c3c}[data-tier="5"]{--c:#e5232b}
   [data-ptier="1"]{--p:#c084fc}[data-ptier="2"]{--p:#a78bfa}[data-ptier="3"]{--p:#8b7cf6}[data-ptier="4"]{--p:#6e6ad6}
   .rtc{--rt:#58a6ff}
 </style>
@@ -58,12 +58,12 @@
   <div class="row"><span class="lbl">Condition</span>
     <div class="bar"><div class="fill" data-mud-bind-attr="data-tier:condTier" data-mud-bind-style="width:condPct"></div><span class="word" data-mud-bind="condName">?</span></div>
     <span class="num"><span data-mud-bind="condCur">?</span>/<span data-mud-bind="condMax">?</span></span></div>
-  <div class="row"><span class="lbl">Footing</span>
-    <div class="bar"><div class="fill" data-mud-bind-attr="data-tier:footTier" data-mud-bind-style="width:footPct"></div><span class="word" data-mud-bind="footName">?</span></div>
-    <span class="num"><span data-mud-bind="footCur">?</span>/<span data-mud-bind="footMax">?</span></span></div>
   <div class="row"><span class="lbl">Focus</span>
     <div class="bar"><div class="fill" data-mud-bind-attr="data-tier:focusTier" data-mud-bind-style="width:focusPct"></div><span class="word" data-mud-bind="focusName">?</span></div>
     <span class="num"><span data-mud-bind="focusCur">?</span>/<span data-mud-bind="focusMax">?</span></span></div>
+  <div class="row"><span class="lbl">Footing</span>
+    <div class="bar"><div class="fill" data-mud-bind-attr="data-tier:footTier" data-mud-bind-style="width:footPct"></div><span class="word" data-mud-bind="footName">?</span></div>
+    <span class="num"><span data-mud-bind="footCur">?</span>/<span data-mud-bind="footMax">?</span></span></div>
   <div class="rt rtc" data-mud-bind-style="display:rtDisplay"><div class="rtfill" data-mud-bind-style="width:rtPct"></div><span class="rtsec" data-mud-bind="rtSec"></span></div>
   <div class="foot">
     <div class="l"><span data-mud-bind="standName">?</span><span>Enc <span data-mud-bind="encum">?</span>%</span></div>
@@ -91,10 +91,10 @@
   <div class="top">
     <div class="pill"><div class="pfill" data-mud-bind-attr="data-tier:condTier" data-mud-bind-style="width:condPct"></div>
       <div class="ptxt" data-mud-bind-attr="title:condTip"><span data-mud-bind="condName">?</span></div></div>
-    <div class="pill"><div class="pfill" data-mud-bind-attr="data-tier:footTier" data-mud-bind-style="width:footPct"></div>
-      <div class="ptxt" data-mud-bind-attr="title:footTip"><span data-mud-bind="footName">?</span></div></div>
     <div class="pill"><div class="pfill" data-mud-bind-attr="data-tier:focusTier" data-mud-bind-style="width:focusPct"></div>
       <div class="ptxt" data-mud-bind-attr="title:focusTip"><span data-mud-bind="focusName">?</span></div></div>
+    <div class="pill"><div class="pfill" data-mud-bind-attr="data-tier:footTier" data-mud-bind-style="width:footPct"></div>
+      <div class="ptxt" data-mud-bind-attr="title:footTip"><span data-mud-bind="footName">?</span></div></div>
     <div class="side">
       <span class="pw" data-mud-bind-attr="data-ptier:powerTier" data-mud-bind-style="display:powerDisplay"><span data-mud-bind="powerName"></span> (<span data-mud-bind="powerCur"></span>)</span>
       <span><b data-mud-bind="standName">?</b> · Enc <b data-mud-bind="encum">?</b>%</span>
@@ -128,12 +128,12 @@
     <div class="st" data-mud-bind-attr="data-tier:condTier"><span class="k">Condition<small><span data-mud-bind="condCur">?</span>/<span data-mud-bind="condMax">?</span></small></span>
       <div class="v" data-mud-bind="condName">?</div>
       <div class="hair"><div data-mud-bind-style="width:condPct"></div></div></div>
-    <div class="st" data-mud-bind-attr="data-tier:footTier"><span class="k">Footing<small><span data-mud-bind="footCur">?</span>/<span data-mud-bind="footMax">?</span></small></span>
-      <div class="v" data-mud-bind="footName">?</div>
-      <div class="hair"><div data-mud-bind-style="width:footPct"></div></div></div>
     <div class="st" data-mud-bind-attr="data-tier:focusTier"><span class="k">Focus<small><span data-mud-bind="focusCur">?</span>/<span data-mud-bind="focusMax">?</span></small></span>
       <div class="v" data-mud-bind="focusName">?</div>
       <div class="hair"><div data-mud-bind-style="width:focusPct"></div></div></div>
+    <div class="st" data-mud-bind-attr="data-tier:footTier"><span class="k">Footing<small><span data-mud-bind="footCur">?</span>/<span data-mud-bind="footMax">?</span></small></span>
+      <div class="v" data-mud-bind="footName">?</div>
+      <div class="hair"><div data-mud-bind-style="width:footPct"></div></div></div>
     <div class="misc">
       <div class="pw" data-mud-bind-attr="data-ptier:powerTier" data-mud-bind-style="display:powerDisplay"><span data-mud-bind="powerName"></span> (<span data-mud-bind="powerCur"></span>)</div>
       <div><span data-mud-bind="standName">?</span> · Enc <span data-mud-bind="encum">?</span>%</div>
