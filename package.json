@@ -1,0 +1,14 @@
+{
+  "name": "textdungeon-hud",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MudForge plugin: TextDungeonC's Status / Effects / Slots HUD, fed by the GMCP Feed",
+  "scripts": {
+    "build": "node tools/build.js",
+    "deploy": "node tools/build.js --install",
+    "test": "node tools/parse-gate.js lib/*.lua src/*.lua textdungeon-hud.lua && luajit tests/run.lua && node tools/build.js --check"
+  },
+  "devDependencies": {
+    "luaparse": "^0.3.1"
+  }
+}
