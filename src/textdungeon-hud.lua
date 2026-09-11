@@ -72,6 +72,14 @@ local function stopTick()
   tick = nil
 end
 
+-- addTimer answers "" while MudForge considers the session disconnected, and
+-- onConnect fires before it stops doing so; every feed push proves the
+-- connection is up, so the tick is (re)started from there until it takes.
+local function ensureTick()
+  if tick ~= nil and tick ~= "" then return end
+  tick = addTimer(TICK_MS, onTick, true)
+end
+
 -- The attach routine (wayfinder #9), shared by init and onConnect: reset every
 -- widget to Unfed, start the tick, and ask the server to re-send every package
 -- with a fresh now_ms. Timers and sendGMCP silently no-op while disconnected;
@@ -80,7 +88,7 @@ local function attach()
   hud.status.s = status.new()
   pushAll()
   stopTick()
-  tick = addTimer(TICK_MS, onTick, true)
+  ensureTick()
   sendGMCP("Core.Hello", { client = plugin.id, version = plugin.version })
 end
 
@@ -88,10 +96,12 @@ function init()
   createColumn()
 
   onGMCPUpdate("Char.Vitals", function(pkg)
+    ensureTick()
     status.vitals(hud.status.s, pkg)
     pushStatus(getCurrentTime())
   end)
   onGMCPUpdate("Char.RoundTime", function(pkg)
+    ensureTick()
     local now = getCurrentTime()
     status.roundtime(hud.status.s, pkg, now)
     pushStatus(now)
