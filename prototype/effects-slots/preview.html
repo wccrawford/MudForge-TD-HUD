@@ -1,0 +1,352 @@
+<!doctype html>
+<!--
+  PROTOTYPE — throwaway. Answers wayfinder ticket #6 (part of map #1):
+  "What should the Effects and Slots widgets look like, and how is list-shaped
+  content driven without losing bindings?"
+  Three structurally different variants of each widget, switchable via
+  ?effects=A|B|C&slots=A|B|C, the floating bar, or the arrow keys (Shift+arrows
+  for Slots). Fake feed buttons stand in for Char.Effects / Char.Items.
+  `node build-lua.js` turns the <template>s below into
+  textdungeon-hud-effects-slots-prototype.lua for MudForge, where the same
+  markup is fed by the real feed — the markup here IS the markup MudForge gets.
+
+  List answer under test: every variant is a FIXED POOL of rows (10 effects,
+  16 slots) that exists from the first `content` set. Membership changes only
+  flip per-row `display` bound values; content is never rewritten, so no
+  binding is ever lost and nothing flickers.
+-->
+<meta charset="utf-8">
+<title>Effects + Slots widget prototype</title>
+<style>
+  body { margin:0; background:#15171c; color:#c9d1d9; font: 13px/1.3 "Segoe UI", system-ui, sans-serif; }
+  #stage { display:flex; flex-direction:column; align-items:flex-start; gap:12px; padding:24px 24px 110px; }
+  #widgets { display:flex; gap:24px; align-items:flex-start; flex-wrap:wrap; }
+  .frame { background:#1e2128; border:1px solid #363b45; border-radius:6px; box-shadow:0 4px 18px #0008; overflow:hidden; }
+  .frame .title { font-size:11px; color:#8b949e; padding:3px 8px; background:#262a33; border-bottom:1px solid #363b45; }
+  .frame .body { padding:6px 8px; box-sizing:border-box; }
+  .feed { display:flex; flex-wrap:wrap; gap:6px; max-width:760px; align-items:center; }
+  .feed b { color:#8b949e; font-weight:500; margin-right:4px; }
+  .feed button { background:#2b3038; color:#c9d1d9; border:1px solid #444; border-radius:4px; padding:4px 8px; cursor:pointer; }
+  .feed button:hover { background:#3a4050; }
+  #state { font: 11px/1.4 Consolas, monospace; color:#8b949e; white-space:pre-wrap; max-width:760px; }
+  #switcher { position:fixed; left:50%; bottom:18px; transform:translateX(-50%); display:flex; align-items:center; gap:18px;
+    background:#f5c542; color:#111; font-weight:600; padding:8px 14px; border-radius:999px; box-shadow:0 6px 20px #000a; user-select:none; white-space:nowrap; }
+  #switcher .grp { display:flex; align-items:center; gap:8px; }
+  #switcher button { background:#111; color:#f5c542; border:0; border-radius:50%; width:28px; height:28px; font-size:16px; cursor:pointer; }
+  #switcher small { font-weight:400; opacity:.75; }
+</style>
+
+<!-- ======== shared CSS: every variant embeds this (build-lua.js inlines it) ======== -->
+<template id="css-shared">
+<style>
+  html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:12px/1.25 "Segoe UI",system-ui,sans-serif;overflow:hidden}
+  *{box-sizing:border-box}
+  /* urgency: 0 normal, 1 under 5 s */
+  [data-urg="0"]{--u:#58a6ff}[data-urg="1"]{--u:#e5232b}
+  /* slot occupancy: 1 = empty */
+  [data-empty="1"]{--i:#4b5563;--l:#4b5563}[data-empty="0"]{--i:#c9d1d9;--l:#8b949e}
+  .empty{color:#6e7681;font-size:11px;font-style:italic}
+</style>
+</template>
+
+<!-- ================= EFFECTS ================= -->
+
+<!-- Variant A — "Timer rows": name left, mm:ss right, a hairline draining under each row -->
+<template id="effects-A" data-name="Timer rows" data-size="240x132">
+<style>
+  .list{display:flex;flex-direction:column;gap:4px}
+  .e{display:flex;flex-direction:column;gap:2px}
+  .e .l{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .e .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .e .t{color:var(--u);font-variant-numeric:tabular-nums;font-size:11px;font-weight:600}
+  .e .h{height:3px;background:#30363d;border-radius:2px;overflow:hidden}
+  .e .h div{height:100%;background:var(--u);transition:width .25s linear}
+</style>
+<div class="list">
+  <div class="empty" data-mud-bind-style="display:effEmpty">No effects</div>
+  <!--pool:10-->
+  <div class="e" data-mud-bind-attr="data-urg:e{i}u" data-mud-bind-style="display:e{i}d">
+    <div class="l"><span class="n" data-mud-bind="e{i}n"></span><span class="t" data-mud-bind="e{i}t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e{i}p"></div></div>
+  </div>
+  <!--/pool-->
+  <div class="empty" data-mud-bind="effMore"></div>
+</div>
+</template>
+
+<!-- Variant B — "Chips": wrapping pills, name · time inside, border carries urgency -->
+<template id="effects-B" data-name="Chips" data-size="240x92">
+<style>
+  .chips{display:flex;flex-wrap:wrap;gap:4px;align-content:flex-start}
+  .c{display:inline-flex;align-items:center;gap:5px;max-width:100%;padding:2px 7px;border:1px solid var(--u);border-radius:999px;background:#0d1117;font-size:11px;line-height:1.2}
+  .c .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .c .t{color:var(--u);font-variant-numeric:tabular-nums;font-weight:600}
+</style>
+<div class="chips">
+  <span class="empty" data-mud-bind-style="display:effEmpty">No effects</span>
+  <!--pool:10-->
+  <span class="c" data-mud-bind-attr="data-urg:e{i}u" data-mud-bind-style="display:e{i}d"><span class="n" data-mud-bind="e{i}n"></span><span class="t" data-mud-bind="e{i}t"></span></span>
+  <!--/pool-->
+  <span class="empty" data-mud-bind="effMore"></span>
+</div>
+</template>
+
+<!-- Variant C — "Ladder": time-led. Big tabular time in a left column, name beside; soonest on top, brightest -->
+<template id="effects-C" data-name="Ladder" data-size="240x118">
+<style>
+  .lad{display:flex;flex-direction:column;gap:2px}
+  .r{display:grid;grid-template-columns:44px 1fr;align-items:center;gap:8px;color:#8b949e}
+  .r.top{color:#e6edf3}
+  .r .t{color:var(--u);font-variant-numeric:tabular-nums;font-weight:700;font-size:13px;text-align:right}
+  .r.top .t{font-size:15px}
+  .r .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+</style>
+<div class="lad">
+  <div class="empty" data-mud-bind-style="display:effEmpty">No effects</div>
+  <!--pool:10-->
+  <div class="r" data-mud-bind-attr="data-urg:e{i}u; class:e{i}c" data-mud-bind-style="display:e{i}d"><span class="t" data-mud-bind="e{i}t"></span><span class="n" data-mud-bind="e{i}n"></span></div>
+  <!--/pool-->
+  <div class="empty" data-mud-bind="effMore"></div>
+</div>
+</template>
+
+<!-- ================= SLOTS ================= -->
+
+<!-- Variant A — "Ledger": one row per slot in feed order, label | item; empties dimmed with a dash -->
+<template id="slots-A" data-name="Ledger" data-size="240x192">
+<style>
+  .led{display:flex;flex-direction:column;gap:1px}
+  .s{display:grid;grid-template-columns:58px 1fr;gap:6px;align-items:baseline;line-height:1.2}
+  .s .l{color:var(--l);font-size:11px;white-space:nowrap}
+  .s .i{color:var(--i);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+</style>
+<div class="led">
+  <div class="empty" data-mud-bind-style="display:slotsEmpty">No slots</div>
+  <!--pool:16-->
+  <div class="s" data-mud-bind-attr="data-empty:s{i}e" data-mud-bind-style="display:s{i}d"><span class="l" data-mud-bind="s{i}l"></span><span class="i" data-mud-bind="s{i}i"></span></div>
+  <!--/pool-->
+</div>
+</template>
+
+<!-- Variant B — "Paperdoll": tiles anchored to a body-shaped grid by slot kind; unknown kinds flow in after -->
+<template id="slots-B" data-name="Paperdoll" data-size="240x150">
+<style>
+  .doll{display:grid;grid-template-columns:repeat(3,1fr);grid-auto-rows:25px;gap:3px}
+  .t{display:flex;flex-direction:column;justify-content:center;min-width:0;padding:1px 5px;border:1px solid #30363d;border-radius:4px;background:#0d1117;line-height:1.1}
+  .t[data-empty="1"]{border-style:dashed;background:transparent}
+  .t .l{color:var(--l);font-size:8px;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .t .i{color:var(--i);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+</style>
+<div class="doll">
+  <!--pool:16-->
+  <div class="t" data-mud-bind-attr="data-empty:s{i}e" data-mud-bind-style="display:s{i}d; grid-area:s{i}g"><span class="l" data-mud-bind="s{i}l"></span><span class="i" data-mud-bind="s{i}i"></span></div>
+  <!--/pool-->
+</div>
+</template>
+
+<!-- Variant C — "Held / Worn": the hands as two big boxes up top, everything worn as one dense running line -->
+<template id="slots-C" data-name="Held / Worn" data-size="240x140">
+<style>
+  .hw{display:flex;flex-direction:column;gap:6px}
+  .k{font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:#6e7681;margin-bottom:2px}
+  .held{display:flex;gap:6px}
+  .hb{flex:1 1 0;min-width:0;padding:4px 7px;border:1px solid #30363d;border-radius:4px;background:#0d1117;line-height:1.15}
+  .hb[data-empty="1"]{border-style:dashed;background:transparent}
+  .hb .l{color:var(--l);font-size:9px;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}
+  .hb .i{color:var(--i);font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .worn{font-size:11px;line-height:1.35}
+  .w{display:inline-block;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
+  .w .l{color:var(--l)}
+  .w .i{color:var(--i)}
+  .w::after{content:" · ";color:#4b5563}
+  .w:last-of-type::after{content:""}
+</style>
+<div class="hw">
+  <div>
+    <div class="k">Held</div>
+    <div class="held">
+      <!--pool:4-->
+      <div class="hb" data-mud-bind-attr="data-empty:h{i}e" data-mud-bind-style="display:h{i}d"><div class="l" data-mud-bind="h{i}l"></div><div class="i" data-mud-bind="h{i}i"></div></div>
+      <!--/pool-->
+    </div>
+  </div>
+  <div>
+    <div class="k">Worn</div>
+    <div class="worn">
+      <!--pool:16-->
+      <span class="w" data-mud-bind-attr="data-empty:w{i}e" data-mud-bind-style="display:w{i}d"><span class="l" data-mud-bind="w{i}l"></span> <span class="i" data-mud-bind="w{i}i"></span></span>
+      <!--/pool-->
+    </div>
+  </div>
+</div>
+</template>
+
+<div id="stage">
+  <div class="feed" id="feed-effects"><b>Char.Effects</b>
+    <button data-e="none">None</button>
+    <button data-e="two">Two buffs</button>
+    <button data-e="fight">Busy fight (6)</button>
+    <button data-e="dozen">Twelve (overflow)</button>
+    <button data-add="4000">Add 4 s effect</button>
+    <button data-add="90000">Add 1:30 effect</button>
+    <button data-expire="1">Server drops the soonest</button>
+    <button data-refresh="1">Server re-applies the soonest (+20 s)</button>
+  </div>
+  <div class="feed" id="feed-slots"><b>Char.Items</b>
+    <button data-s="naked">Naked villager</button>
+    <button data-s="kitted">Kitted villager</button>
+    <button data-s="twohand">Two-handed (same instance in both hands)</button>
+    <button data-s="long">Long names</button>
+    <button data-s="beast">Beast race (Tail, Wings, Horn)</button>
+    <button data-s="noslots">Race with no slots</button>
+  </div>
+  <div id="widgets"><div id="host-effects"></div><div id="host-slots"></div></div>
+  <div id="state"></div>
+</div>
+<div id="switcher">
+  <div class="grp"><button id="ep">←</button><span>Effects <span id="el"></span></span><button id="en">→</button></div>
+  <div class="grp"><button id="sp">←</button><span>Slots <span id="sl"></span> <small>(Shift+←/→)</small></span><button id="sn">→</button></div>
+</div>
+
+<script>
+// ---------- pool expansion (build-lua.js has the same 4 lines) ----------
+function expandPool(html) {
+  return html.replace(/<!--pool:(\d+)-->([\s\S]*?)<!--\/pool-->/g, (_, n, row) =>
+    Array.from({ length: +n }, (_, i) => row.replace(/\{i\}/g, i + 1)).join(''));
+}
+
+// ---------- fake feed (same shapes the server sends) ----------
+const nowMs = () => Math.floor(performance.now());
+const NAMES = ['Stoneskin', 'Haste', 'Bless', 'Death Weakness', 'Fortify', 'Poisoned', 'Barkskin', 'Regeneration', 'Slow', 'Blinded', 'Shielded', 'Enraged'];
+let effects = []; // [{name, ends_at_ms}] in server ms (== local ms here; skew is irrelevant to the look)
+function effScenario(k) {
+  const t = nowMs();
+  const mk = (n, ms) => ({ name: NAMES[n], ends_at_ms: t + ms });
+  if (k === 'none') effects = [];
+  if (k === 'two') effects = [mk(0, 154000), mk(1, 42000)];
+  if (k === 'fight') effects = [mk(0, 154000), mk(1, 42000), mk(2, 8000), mk(3, 300000), mk(4, 3400), mk(5, 61000)];
+  if (k === 'dozen') effects = NAMES.map((_, i) => mk(i, 6000 + i * 23000));
+}
+function effectsPkg() { return { effects: effects.map(e => ({ ...e })), now_ms: nowMs() }; }
+
+const VILLAGER = ['Head', 'Body', 'Legs', 'Feet', 'Hands', 'Hand 1', 'Hand 2', 'Waist', 'Back', 'Neck', 'Finger 1', 'Finger 2'];
+const BEAST = ['Head', 'Body', 'Legs', 'Feet', 'Hand 1', 'Hand 2', 'Neck', 'Tail', 'Wing 1', 'Wing 2', 'Horn'];
+let slots = [];
+let inst = 1;
+function fill(order, items) { inst = 1; return order.map(s => items[s] ? { slot: s, instance: (items[s].__id ?? (items[s].__id = inst++)), item: items[s].n } : { slot: s, instance: null, item: null }); }
+function slotScenario(k) {
+  const it = n => ({ n });
+  if (k === 'naked') slots = fill(VILLAGER, {});
+  if (k === 'kitted') slots = fill(VILLAGER, { Head: it('a leather cap'), Body: it('a wool tunic'), Legs: it('wool trousers'), Feet: it('worn boots'), 'Hand 1': it('a rusty shortsword'), 'Hand 2': it('a wooden shield'), Back: it('a canvas pack'), 'Finger 1': it('a copper ring') });
+  if (k === 'twohand') { const bow = it('a yew longbow'); slots = fill(VILLAGER, { 'Hand 1': bow, 'Hand 2': bow, Body: it('a wool tunic'), Back: it('a quiver of 14 arrows') }); }
+  if (k === 'long') slots = fill(VILLAGER, { Head: it('a magnificently plumed ceremonial helm of the third dynasty'), 'Hand 1': it('3 torches'), 'Hand 2': it('an unfinished oaken staff'), Body: it('a moth-eaten but surprisingly warm bearskin cloak') });
+  if (k === 'beast') slots = fill(BEAST, { Head: it('a horned circlet'), 'Hand 1': it('a bone club'), Tail: it('a spiked tail-ring'), Horn: it('a brass horn-cap') });
+  if (k === 'noslots') slots = [];
+}
+function itemsPkg() { return { slots: slots.map(s => ({ ...s })) }; }
+
+// ---------- the logic the real plugin's lib will own ----------
+const EFF_POOL = 10, SLOT_POOL = 16, HELD_POOL = 4;
+let anchors = []; // [{name, endsLocal, span}] — re-anchored on every push, drained by the tick
+function onEffects(pkg) {
+  const now = nowMs();
+  const prev = Object.fromEntries(anchors.map(a => [a.name, a]));
+  anchors = (pkg.effects || []).map(e => {
+    const left = e.ends_at_ms - pkg.now_ms;
+    const span = Math.max(left, prev[e.name]?.span ?? 0);
+    return { name: e.name, endsLocal: now + left, span };
+  });
+}
+function mmss(ms) { const s = Math.max(0, Math.ceil(ms / 1000)); const m = Math.floor(s / 60), r = s % 60; return m + ':' + (r < 10 ? '0' : '') + r; }
+function effectsKeys() {
+  const now = nowMs();
+  const live = anchors.filter(a => a.endsLocal > now).sort((x, y) => x.endsLocal - y.endsLocal);
+  const k = { effEmpty: live.length ? 'none' : '', effMore: live.length > EFF_POOL ? '+' + (live.length - EFF_POOL) + ' more' : '' };
+  for (let i = 1; i <= EFF_POOL; i++) {
+    const a = live[i - 1];
+    if (a) { const left = a.endsLocal - now; k['e'+i+'n'] = a.name; k['e'+i+'t'] = mmss(left); k['e'+i+'u'] = left < 5000 ? 1 : 0; k['e'+i+'p'] = (a.span > 0 ? left / a.span * 100 : 0) + '%'; k['e'+i+'d'] = ''; k['e'+i+'c'] = i === 1 ? 'r top' : 'r'; }
+    else { k['e'+i+'n'] = ''; k['e'+i+'t'] = ''; k['e'+i+'u'] = 0; k['e'+i+'p'] = '0%'; k['e'+i+'d'] = 'none'; k['e'+i+'c'] = 'r'; }
+  }
+  return k;
+}
+const DOLL = { Neck: '1/1', Head: '1/2', Back: '1/3', 'Hand 1': '2/1', Body: '2/2', 'Hand 2': '2/3', 'Finger 1': '3/1', Waist: '3/2', 'Finger 2': '3/3', Hands: '4/1', Legs: '4/2', Feet: '5/2' };
+const isHeld = s => /^Hand( \d+)?$/.test(s);
+function slotsKeys(pkg) {
+  const list = pkg.slots || [];
+  const k = { slotsEmpty: list.length ? 'none' : '' };
+  const row = (p, i, s, dash) => { if (s) { k[p+i+'l'] = s.slot; k[p+i+'i'] = s.item ?? dash; k[p+i+'e'] = s.item == null ? 1 : 0; k[p+i+'d'] = ''; } else { k[p+i+'l'] = ''; k[p+i+'i'] = ''; k[p+i+'e'] = 1; k[p+i+'d'] = 'none'; } };
+  for (let i = 1; i <= SLOT_POOL; i++) { const s = list[i - 1]; row('s', i, s, '—'); k['s'+i+'g'] = s && DOLL[s.slot] ? DOLL[s.slot] : 'auto'; }
+  const held = list.filter(s => isHeld(s.slot)), worn = list.filter(s => !isHeld(s.slot));
+  for (let i = 1; i <= HELD_POOL; i++) row('h', i, held[i - 1], 'empty');
+  for (let i = 1; i <= SLOT_POOL; i++) row('w', i, worn[i - 1], '');
+  return k;
+}
+
+// ---------- mini implementation of MudForge's data-mud-bind* ----------
+function applyBound(root, vals) {
+  for (const [k, v] of Object.entries(vals))
+    root.querySelectorAll(`[data-mud-bind="${k}"]`).forEach(el => el.textContent = v == null ? '' : String(v));
+  root.querySelectorAll('[data-mud-bind-style]').forEach(el => el.dataset.mudBindStyle.split(';').forEach(pair => {
+    const [prop, key] = pair.split(':').map(s => s.trim()); if (key in vals) el.style[prop] = vals[key] == null ? '' : String(vals[key]);
+  }));
+  root.querySelectorAll('[data-mud-bind-attr]').forEach(el => el.dataset.mudBindAttr.split(';').forEach(pair => {
+    const [attr, key] = pair.split(':').map(s => s.trim()); if (key in vals) el.setAttribute(attr, vals[key] == null ? '' : String(vals[key]));
+  }));
+}
+
+// ---------- mounting + switcher ----------
+const VARIANTS = ['A', 'B', 'C'];
+const params = new URLSearchParams(location.search);
+const pick = k => VARIANTS.includes(params.get(k)) ? params.get(k) : 'A';
+let sel = { effects: pick('effects'), slots: pick('slots') };
+const bodies = {};
+let contentSets = { effects: 0, slots: 0 };
+function mount(which) {
+  const tpl = document.getElementById(which + '-' + sel[which]);
+  const [w, h] = tpl.dataset.size.split('x');
+  const host = document.getElementById('host-' + which); host.innerHTML = '';
+  const frame = document.createElement('div'); frame.className = 'frame'; frame.style.width = w + 'px';
+  frame.innerHTML = `<div class="title">TextDungeon — ${which[0].toUpperCase() + which.slice(1)} (${sel[which]}: ${tpl.dataset.name}, ${w}×${h})</div>`;
+  const body = document.createElement('div'); body.className = 'body'; body.style.height = h + 'px';
+  body.innerHTML = expandPool(document.getElementById('css-shared').innerHTML + tpl.innerHTML);
+  frame.appendChild(body); host.appendChild(frame);
+  bodies[which] = body; contentSets[which]++;
+  document.getElementById(which === 'effects' ? 'el' : 'sl').textContent = `${sel[which]} — ${tpl.dataset.name}`;
+  history.replaceState(null, '', `?effects=${sel.effects}&slots=${sel.slots}`);
+  push();
+}
+function push() {
+  if (!bodies.effects || !bodies.slots) return;
+  const ek = effectsKeys(), sk = slotsKeys(itemsPkg());
+  applyBound(bodies.effects, ek); applyBound(bodies.slots, sk);
+  document.getElementById('state').textContent =
+    `content set: effects ×${contentSets.effects}, slots ×${contentSets.slots} (once per variant mount; never on a feed push)\n` +
+    'Char.Effects ' + JSON.stringify(effectsPkg()) + '\nChar.Items   ' + JSON.stringify(itemsPkg()) +
+    '\nbound(effects) ' + JSON.stringify(ek) + '\nbound(slots)   ' + JSON.stringify(sk);
+}
+function cycle(which, d) { sel[which] = VARIANTS[(VARIANTS.indexOf(sel[which]) + d + VARIANTS.length) % VARIANTS.length]; mount(which); }
+document.getElementById('ep').onclick = () => cycle('effects', -1);
+document.getElementById('en').onclick = () => cycle('effects', 1);
+document.getElementById('sp').onclick = () => cycle('slots', -1);
+document.getElementById('sn').onclick = () => cycle('slots', 1);
+addEventListener('keydown', e => {
+  if (/INPUT|TEXTAREA/.test(document.activeElement.tagName) || document.activeElement.isContentEditable) return;
+  const which = e.shiftKey ? 'slots' : 'effects';
+  if (e.key === 'ArrowLeft') cycle(which, -1); if (e.key === 'ArrowRight') cycle(which, 1);
+});
+document.getElementById('feed-effects').onclick = e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.e) effScenario(b.dataset.e);
+  if (b.dataset.add) effects.push({ name: NAMES[(effects.length + 3) % NAMES.length] + ' ' + (effects.length + 1), ends_at_ms: nowMs() + +b.dataset.add });
+  if (b.dataset.expire) { effects.sort((x, y) => x.ends_at_ms - y.ends_at_ms).shift(); }
+  if (b.dataset.refresh && effects.length) { effects.sort((x, y) => x.ends_at_ms - y.ends_at_ms); effects[0].ends_at_ms += 20000; }
+  onEffects(effectsPkg()); push();
+};
+document.getElementById('feed-slots').onclick = e => {
+  const b = e.target.closest('button'); if (!b) return;
+  slotScenario(b.dataset.s); push();
+};
+setInterval(() => { effects = effects.filter(e => e.ends_at_ms > nowMs()); if (anchors.length) push(); }, 250); // local tick between pushes
+effScenario('fight'); onEffects(effectsPkg()); slotScenario('kitted');
+mount('effects'); mount('slots');
+</script>
