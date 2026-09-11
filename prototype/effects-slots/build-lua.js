@@ -137,7 +137,11 @@ local function isHeld(label)
 end
 
 local function slotsKeys(pkg)
-  local list = (pkg and pkg.slots) or {}
+  -- Copy through ipairs: in MudForge the raw GMCP array skipped its first element under list[i]
+  -- (Head vanished from Ledger/Paperdoll but not from Held / Worn, which was built with ipairs).
+  local list = {}
+  for _, s in ipairs((pkg and pkg.slots) or {}) do list[#list + 1] = s end
+  print("[effects-slots] Char.Items raw #slots=" .. tostring(#((pkg and pkg.slots) or {})) .. " raw[0]=" .. tostring(((pkg and pkg.slots) or {})[0] and ((pkg and pkg.slots) or {})[0].slot) .. " raw[1]=" .. tostring(((pkg and pkg.slots) or {})[1] and ((pkg and pkg.slots) or {})[1].slot) .. " copied=" .. #list)
   local k = { slotsEmpty = (#list > 0) and "none" or "" }
   local function row(prefix, i, s, dash)
     local p = prefix .. i
@@ -191,6 +195,14 @@ function init()
   onEffects(getGMCPData("Char.Effects"))
   pushAll("effects", effectsKeys())
   pushAll("slots", slotsKeys(getGMCPData("Char.Items")))
+  -- Re-push shortly after mount: the first push above may land before the widget iframes are
+  -- ready (Effects showed all pool rows despite display:none until a later feed push).
+  addTimer(750, function()
+    onEffects(getGMCPData("Char.Effects"))
+    pushAll("effects", effectsKeys())
+    pushAll("slots", slotsKeys(getGMCPData("Char.Items")))
+    print("[effects-slots] re-pushed bound values 750 ms after mount")
+  end, false)
   startTick()
   print("[textdungeon-hud-effects-slots-prototype] mounted Effects A/B/C and Slots A/B/C")
 end
