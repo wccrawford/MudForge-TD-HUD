@@ -1,0 +1,270 @@
+<!doctype html>
+<!--
+  PROTOTYPE — throwaway. Answers wayfinder ticket #5 (part of map #1):
+  "What should the Status widget look like?"
+  Three structurally different variants of the same bound markup, switchable via
+  ?variant=A|B|C, the floating bar, or the arrow keys. Fake feed buttons stand in
+  for Char.Vitals / Char.RoundTime. `node build-lua.js` turns the <template>s
+  below into textdungeon-hud-prototype.lua for MudForge, where the same markup is
+  fed by the real feed — the markup here IS the markup MudForge gets.
+-->
+<meta charset="utf-8">
+<title>Status widget prototype</title>
+<style>
+  body { margin:0; background:#15171c; color:#c9d1d9; font: 13px/1.3 "Segoe UI", system-ui, sans-serif; }
+  #stage { display:flex; flex-direction:column; align-items:flex-start; gap:12px; padding:24px 24px 90px; }
+  .frame { background:#1e2128; border:1px solid #363b45; border-radius:6px; box-shadow:0 4px 18px #0008; overflow:hidden; }
+  .frame .title { font-size:11px; color:#8b949e; padding:3px 8px; background:#262a33; border-bottom:1px solid #363b45; }
+  .frame .body { padding:6px 8px; box-sizing:border-box; }
+  #feed { display:flex; flex-wrap:wrap; gap:6px; max-width:640px; }
+  #feed button { background:#2b3038; color:#c9d1d9; border:1px solid #444; border-radius:4px; padding:4px 8px; cursor:pointer; }
+  #feed button:hover { background:#3a4050; }
+  #state { font: 11px/1.4 Consolas, monospace; color:#8b949e; white-space:pre-wrap; max-width:720px; }
+  #switcher { position:fixed; left:50%; bottom:18px; transform:translateX(-50%); display:flex; align-items:center; gap:10px;
+    background:#f5c542; color:#111; font-weight:600; padding:8px 14px; border-radius:999px; box-shadow:0 6px 20px #000a; user-select:none; }
+  #switcher button { background:#111; color:#f5c542; border:0; border-radius:50%; width:28px; height:28px; font-size:16px; cursor:pointer; }
+</style>
+
+<!-- ======== shared CSS: every variant embeds this (build-lua.js inlines it) ======== -->
+<template id="css-shared">
+<style>
+  html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:12px/1.25 "Segoe UI",system-ui,sans-serif;overflow:hidden}
+  *{box-sizing:border-box}
+  /* tier ramp: 1 best … 5 worst (Condition/Footing/Focus); power 1 strongest … 4 slightest */
+  [data-tier="1"]{--c:#3fb950}[data-tier="2"]{--c:#9bc53d}[data-tier="3"]{--c:#e3b341}[data-tier="4"]{--c:#f0883e}[data-tier="5"]{--c:#f85149}
+  [data-ptier="1"]{--p:#c084fc}[data-ptier="2"]{--p:#a78bfa}[data-ptier="3"]{--p:#8b7cf6}[data-ptier="4"]{--p:#6e6ad6}
+  .rtc{--rt:#58a6ff}
+</style>
+</template>
+
+<!-- ======== Variant A — "Stacked meters" ======== -->
+<template id="variant-A" data-name="Stacked meters" data-size="240x132">
+<style>
+  .hud{display:flex;flex-direction:column;gap:5px;padding:2px 0}
+  .row{display:grid;grid-template-columns:62px 1fr 48px;align-items:center;gap:6px}
+  .lbl{color:#8b949e;font-size:11px}
+  .bar{position:relative;height:16px;background:#0d1117;border:1px solid #30363d;border-radius:3px;overflow:hidden}
+  .fill{position:absolute;top:0;bottom:0;left:0;background:var(--c,#555);transition:width .25s}
+  .word{position:absolute;inset:0;display:flex;align-items:center;padding-left:6px;font-size:11px;color:#fff;text-shadow:0 0 3px #000,0 0 2px #000}
+  .num{color:#8b949e;font-size:11px;text-align:right;font-variant-numeric:tabular-nums}
+  .rt{position:relative;height:14px;background:#0d1117;border:1px solid #30363d;border-radius:3px;overflow:hidden;margin-top:2px}
+  .rtfill{position:absolute;top:0;bottom:0;left:0;background:var(--rt);transition:width .1s linear}
+  .rtsec{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;text-shadow:0 0 3px #000}
+  .foot{display:flex;flex-direction:column;gap:1px;font-size:11px;color:#8b949e;margin-top:2px;white-space:nowrap}
+  .foot .l{display:flex;justify-content:space-between}
+  .pw{color:var(--p)}
+</style>
+<div class="hud">
+  <div class="row"><span class="lbl">Condition</span>
+    <div class="bar"><div class="fill" data-mud-bind-attr="data-tier:condTier" data-mud-bind-style="width:condPct"></div><span class="word" data-mud-bind="condName">?</span></div>
+    <span class="num"><span data-mud-bind="condCur">?</span>/<span data-mud-bind="condMax">?</span></span></div>
+  <div class="row"><span class="lbl">Footing</span>
+    <div class="bar"><div class="fill" data-mud-bind-attr="data-tier:footTier" data-mud-bind-style="width:footPct"></div><span class="word" data-mud-bind="footName">?</span></div>
+    <span class="num"><span data-mud-bind="footCur">?</span>/<span data-mud-bind="footMax">?</span></span></div>
+  <div class="row"><span class="lbl">Focus</span>
+    <div class="bar"><div class="fill" data-mud-bind-attr="data-tier:focusTier" data-mud-bind-style="width:focusPct"></div><span class="word" data-mud-bind="focusName">?</span></div>
+    <span class="num"><span data-mud-bind="focusCur">?</span>/<span data-mud-bind="focusMax">?</span></span></div>
+  <div class="rt rtc" data-mud-bind-style="display:rtDisplay"><div class="rtfill" data-mud-bind-style="width:rtPct"></div><span class="rtsec" data-mud-bind="rtSec"></span></div>
+  <div class="foot">
+    <div class="l"><span data-mud-bind="standName">?</span><span>Enc <span data-mud-bind="encum">?</span>%</span></div>
+    <div class="pw" data-mud-bind-attr="data-ptier:powerTier" data-mud-bind-style="display:powerDisplay">Holding <span data-mud-bind="powerName"></span> (<span data-mud-bind="powerCur"></span>)</div>
+  </div>
+</div>
+</template>
+
+<!-- ======== Variant B — "Prompt strip" (wide, one line, like the prompt) ======== -->
+<template id="variant-B" data-name="Prompt strip" data-size="540x62">
+<style>
+  .strip{display:flex;flex-direction:column;gap:3px}
+  .top{display:flex;align-items:stretch;gap:6px;height:24px}
+  .pill{position:relative;flex:1 1 0;border:1px solid #30363d;border-radius:12px;background:#0d1117;overflow:hidden}
+  .pfill{position:absolute;top:0;bottom:0;left:0;background:var(--c,#555);opacity:.85;transition:width .25s}
+  .ptxt{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:0 8px;color:#fff;text-shadow:0 0 3px #000,0 0 2px #000;font-size:11px;white-space:nowrap}
+  .side{display:flex;flex-direction:column;justify-content:center;font-size:10px;color:#8b949e;line-height:1.15;white-space:nowrap;text-align:right}
+  .side b{color:#c9d1d9;font-weight:500}
+  .pw{color:var(--p)}
+  .rtline{position:relative;height:10px;background:#0d1117;border:1px solid #30363d;border-radius:5px;overflow:hidden}
+  .rtfill{position:absolute;top:0;bottom:0;left:0;background:var(--rt);transition:width .1s linear}
+  .rtsec{position:absolute;right:6px;top:-1px;font-size:9px;color:#fff;text-shadow:0 0 3px #000}
+</style>
+<div class="strip">
+  <div class="top">
+    <div class="pill"><div class="pfill" data-mud-bind-attr="data-tier:condTier" data-mud-bind-style="width:condPct"></div>
+      <div class="ptxt" data-mud-bind-attr="title:condTip"><span data-mud-bind="condName">?</span></div></div>
+    <div class="pill"><div class="pfill" data-mud-bind-attr="data-tier:footTier" data-mud-bind-style="width:footPct"></div>
+      <div class="ptxt" data-mud-bind-attr="title:footTip"><span data-mud-bind="footName">?</span></div></div>
+    <div class="pill"><div class="pfill" data-mud-bind-attr="data-tier:focusTier" data-mud-bind-style="width:focusPct"></div>
+      <div class="ptxt" data-mud-bind-attr="title:focusTip"><span data-mud-bind="focusName">?</span></div></div>
+    <div class="side">
+      <span class="pw" data-mud-bind-attr="data-ptier:powerTier" data-mud-bind-style="display:powerDisplay"><span data-mud-bind="powerName"></span> (<span data-mud-bind="powerCur"></span>)</span>
+      <span><b data-mud-bind="standName">?</b> · Enc <b data-mud-bind="encum">?</b>%</span>
+    </div>
+  </div>
+  <div class="rtline rtc" data-mud-bind-style="display:rtDisplay"><div class="rtfill" data-mud-bind-style="width:rtPct"></div><span class="rtsec" data-mud-bind="rtSec"></span></div>
+</div>
+</template>
+
+<!-- ======== Variant C — "Word-led" (band words are the display; bars are hairlines; RT is a big numeral) ======== -->
+<template id="variant-C" data-name="Word-led" data-size="200x172">
+<style>
+  .wl{display:grid;grid-template-columns:1fr 54px;gap:0 8px;height:100%}
+  .stats{display:flex;flex-direction:column;gap:6px}
+  .st{display:flex;flex-direction:column;gap:2px}
+  .st .k{display:flex;justify-content:space-between;font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:#6e7681}
+  .st .k small{letter-spacing:0;text-transform:none;font-variant-numeric:tabular-nums}
+  .st .v{font-size:14px;font-weight:600;color:var(--c,#c9d1d9);line-height:1.1;white-space:nowrap}
+  .hair{height:3px;background:#30363d;border-radius:2px;overflow:hidden}
+  .hair div{height:100%;background:var(--c,#555);transition:width .25s}
+  .misc{font-size:10px;color:#8b949e;margin-top:2px;line-height:1.3;white-space:nowrap}
+  .misc .pw{color:var(--p)}
+  .rtbox{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:3px;border-left:1px solid #30363d;padding-left:8px}
+  .rtnum{font-size:22px;font-weight:700;color:var(--rt);font-variant-numeric:tabular-nums;line-height:1}
+  .rtcol{width:10px;flex:1;background:#0d1117;border:1px solid #30363d;border-radius:5px;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end}
+  .rtcol div{width:100%;background:var(--rt);transition:height .1s linear}
+  .rtk{font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:#6e7681}
+</style>
+<div class="wl">
+  <div class="stats">
+    <div class="st" data-mud-bind-attr="data-tier:condTier"><span class="k">Condition<small><span data-mud-bind="condCur">?</span>/<span data-mud-bind="condMax">?</span></small></span>
+      <div class="v" data-mud-bind="condName">?</div>
+      <div class="hair"><div data-mud-bind-style="width:condPct"></div></div></div>
+    <div class="st" data-mud-bind-attr="data-tier:footTier"><span class="k">Footing<small><span data-mud-bind="footCur">?</span>/<span data-mud-bind="footMax">?</span></small></span>
+      <div class="v" data-mud-bind="footName">?</div>
+      <div class="hair"><div data-mud-bind-style="width:footPct"></div></div></div>
+    <div class="st" data-mud-bind-attr="data-tier:focusTier"><span class="k">Focus<small><span data-mud-bind="focusCur">?</span>/<span data-mud-bind="focusMax">?</span></small></span>
+      <div class="v" data-mud-bind="focusName">?</div>
+      <div class="hair"><div data-mud-bind-style="width:focusPct"></div></div></div>
+    <div class="misc">
+      <div class="pw" data-mud-bind-attr="data-ptier:powerTier" data-mud-bind-style="display:powerDisplay"><span data-mud-bind="powerName"></span> (<span data-mud-bind="powerCur"></span>)</div>
+      <div><span data-mud-bind="standName">?</span> · Enc <span data-mud-bind="encum">?</span>%</div>
+    </div>
+  </div>
+  <div class="rtbox rtc" data-mud-bind-style="visibility:rtVisibility">
+    <span class="rtnum" data-mud-bind="rtSec"></span>
+    <div class="rtcol"><div data-mud-bind-style="height:rtPct"></div></div>
+    <span class="rtk">RT</span>
+  </div>
+</div>
+</template>
+
+<div id="stage">
+  <div id="feed">
+    <button data-s="fresh">Fresh (login, RT never)</button>
+    <button data-s="bruised">Bruised</button>
+    <button data-s="battered">Battered + power</button>
+    <button data-s="dying">Dying, about to fall</button>
+    <button data-p="1">Toggle held power</button>
+    <button data-r="3200">RT 3.2s</button>
+    <button data-r="5200">RT 5.2s</button>
+    <button data-r="12000">RT 12s</button>
+    <button data-r="0">RT clear</button>
+  </div>
+  <div id="widget-host"></div>
+  <div id="state"></div>
+</div>
+<div id="switcher"><button id="prev">←</button><span id="label"></span><button id="next">→</button></div>
+
+<script>
+// ---------- fake feed (same shapes and ladders the server sends) ----------
+function ladderBand(v, ladder) { const i = ladder.findIndex(([t]) => v >= t); return { name: ladder[i][1], tier: i + 1, of: ladder.length }; }
+const COND  = [[80,'Unhurt'],[55,'Wounded'],[30,'Badly Wounded'],[10,'Gravely Wounded'],[-Infinity,'Dying']];          // raw 0..100
+const FOOT  = [[.8,'steady'],[.5,'a bit unsteady'],[.25,'unsteady'],[.05,'badly off-balance'],[-Infinity,'about to fall']]; // fraction
+const FOCUS = [[.8,'sharp'],[.5,'clear'],[.25,'clouded'],[.05,'frayed'],[-Infinity,'spent']];                              // fraction
+const POWER = [[24,'a great charge'],[12,'a considerable charge'],[6,'a moderate charge'],[-Infinity,'a slight charge']];  // raw amount
+const STAND = [[20,'Master'],[15,'Expert'],[10,'Journeyman'],[5,'Apprentice'],[0,'Novice']];                               // raw
+const scenarios = {
+  fresh:    { cond:100, foot:100, focus:60, fmax:60, power:null, stand:3,  enc:12 },
+  bruised:  { cond:68,  foot:74,  focus:41, fmax:60, power:null, stand:11, enc:35 },
+  battered: { cond:38,  foot:33,  focus:14, fmax:60, power:8.4,  stand:11, enc:35 },
+  dying:    { cond:6,   foot:2,   focus:1,  fmax:60, power:27,   stand:22, enc:71 },
+};
+let cur = { ...scenarios.fresh };
+let rt = { clears_at_ms: 0, now_ms: 0 };
+const nowMs = () => Math.floor(performance.now());
+function vitals() {
+  const v = { condition: { ...ladderBand(cur.cond, COND), cur: cur.cond, max: 100 },
+              footing:   { ...ladderBand(cur.foot / 100, FOOT), cur: cur.foot, max: 100 },
+              focus:     { ...ladderBand(cur.focus / cur.fmax, FOCUS), cur: cur.focus, max: cur.fmax },
+              standing:  ladderBand(cur.stand, STAND), encumbrance: cur.enc };
+  if (cur.power != null) v.power = { ...ladderBand(cur.power, POWER), cur: Math.max(1, Math.round(cur.power)) };
+  return v;
+}
+
+// ---------- the logic the real plugin's lib will own ----------
+function pct(c, m) { return m > 0 ? Math.max(0, Math.min(100, c / m * 100)) : 0; }
+function vitalsKeys(v) {
+  const k = {};
+  for (const [key, m] of [['cond', v.condition], ['foot', v.footing], ['focus', v.focus]]) {
+    k[key+'Name'] = m.name; k[key+'Cur'] = m.cur; k[key+'Max'] = m.max; k[key+'Tier'] = m.tier; k[key+'Pct'] = pct(m.cur, m.max) + '%'; k[key+'Tip'] = m.cur + '/' + m.max;
+  }
+  if (v.power) { k.powerName = v.power.name; k.powerCur = v.power.cur; k.powerTier = v.power.tier; k.powerDisplay = ''; }
+  else { k.powerName = ''; k.powerCur = ''; k.powerTier = ''; k.powerDisplay = 'none'; }
+  k.standName = v.standing.name; k.encum = v.encumbrance;
+  return k;
+}
+let rtAnchor = null; // { total, endsAt } on the local clock
+function rtKeys() {
+  if (!rtAnchor) return { rtDisplay: 'none', rtVisibility: 'hidden', rtPct: '0%', rtSec: '' };
+  const left = rtAnchor.endsAt - nowMs();
+  if (left <= 0) { rtAnchor = null; return rtKeys(); }
+  return { rtDisplay: '', rtVisibility: 'visible', rtPct: (left / rtAnchor.total * 100) + '%', rtSec: (left / 1000).toFixed(1) + 's' };
+}
+function onRoundTime(pkg) { // cadence-agnostic: every push re-anchors remaining = clears_at − now
+  const left = pkg.clears_at_ms - pkg.now_ms;
+  if (pkg.clears_at_ms === 0 || left <= 0) { rtAnchor = null; return; }
+  const stillRunning = rtAnchor && rtAnchor.endsAt > nowMs();
+  rtAnchor = { total: stillRunning ? Math.max(rtAnchor.total, left) : left, endsAt: nowMs() + left };
+}
+
+// ---------- mini implementation of MudForge's data-mud-bind* ----------
+function applyBound(root, vals) {
+  for (const [k, v] of Object.entries(vals))
+    root.querySelectorAll(`[data-mud-bind="${k}"]`).forEach(el => el.textContent = v == null ? '' : String(v));
+  root.querySelectorAll('[data-mud-bind-style]').forEach(el => el.dataset.mudBindStyle.split(';').forEach(pair => {
+    const [prop, key] = pair.split(':').map(s => s.trim()); if (key in vals) el.style[prop] = vals[key] == null ? '' : String(vals[key]);
+  }));
+  root.querySelectorAll('[data-mud-bind-attr]').forEach(el => el.dataset.mudBindAttr.split(';').forEach(pair => {
+    const [attr, key] = pair.split(':').map(s => s.trim()); if (key in vals) el.setAttribute(attr, vals[key] == null ? '' : String(vals[key]));
+  }));
+}
+
+// ---------- variant mounting + switcher ----------
+const VARIANTS = ['A', 'B', 'C'];
+const params = new URLSearchParams(location.search);
+let variant = VARIANTS.includes(params.get('variant')) ? params.get('variant') : 'A';
+let body;
+function mount() {
+  const tpl = document.getElementById('variant-' + variant);
+  const [w, h] = tpl.dataset.size.split('x');
+  const host = document.getElementById('widget-host'); host.innerHTML = '';
+  const frame = document.createElement('div'); frame.className = 'frame'; frame.style.width = w + 'px';
+  frame.innerHTML = `<div class="title">TextDungeon — Status (${variant}: ${tpl.dataset.name}, ${w}×${h})</div>`;
+  body = document.createElement('div'); body.className = 'body'; body.style.height = h + 'px';
+  body.appendChild(document.getElementById('css-shared').content.cloneNode(true));
+  body.appendChild(tpl.content.cloneNode(true));
+  frame.appendChild(body); host.appendChild(frame);
+  document.getElementById('label').textContent = `${variant} — ${tpl.dataset.name}`;
+  history.replaceState(null, '', '?variant=' + variant);
+  push();
+}
+function push() {
+  const v = vitals();
+  const keys = { ...vitalsKeys(v), ...rtKeys() };
+  applyBound(body, keys);
+  document.getElementById('state').textContent =
+    'Char.Vitals    ' + JSON.stringify(v) + '\nChar.RoundTime ' + JSON.stringify(rt) + '\nbound          ' + JSON.stringify(keys);
+}
+function cycle(d) { variant = VARIANTS[(VARIANTS.indexOf(variant) + d + VARIANTS.length) % VARIANTS.length]; mount(); }
+document.getElementById('prev').onclick = () => cycle(-1);
+document.getElementById('next').onclick = () => cycle(1);
+addEventListener('keydown', e => { if (/INPUT|TEXTAREA/.test(document.activeElement.tagName)) return; if (e.key === 'ArrowLeft') cycle(-1); if (e.key === 'ArrowRight') cycle(1); });
+document.getElementById('feed').onclick = e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.s) cur = { ...scenarios[b.dataset.s] };
+  if (b.dataset.p) cur.power = cur.power == null ? 8.4 : null;
+  if (b.dataset.r != null) { const ms = +b.dataset.r; rt = { clears_at_ms: ms ? nowMs() + ms : 0, now_ms: nowMs() }; onRoundTime(rt); }
+  push();
+};
+setInterval(() => { if (rtAnchor) push(); }, 100); // local tick between pushes
+mount();
+</script>
