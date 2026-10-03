@@ -4,7 +4,7 @@
 plugin = {
   id = "textdungeon-hud",
   name = "textdungeon-hud",
-  version = "0.1.0",
+  version = "0.2.0",
   author = "wccrawford",
   description = "TextDungeon's Status, Effects, Slots, Page and Quest as MudForge widgets, fed by the GMCP Feed.",
   settings = { saveState = true },
