@@ -1,6 +1,6 @@
 # TextDungeon HUD
 
-A [MudForge](https://mudforge.org) plugin that renders TextDungeonC's always-visible character state — **Status**, **Effects**, **Slots** — as three `html` widgets fed only by the server's GMCP Feed.
+A [MudForge](https://mudforge.org) plugin that renders TextDungeonC's always-visible character state — **Status**, **Effects**, **Slots** — plus the last page read (**Page**) and quest pulled up (**Quest**), each with a list of recent ones, and a **Windows** bar that reopens any of them, as `html` widgets fed only by the server's GMCP Feed.
 
 ## Install
 

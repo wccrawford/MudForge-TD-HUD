@@ -1,6 +1,6 @@
 # TextDungeon HUD
 
-A MudForge plugin that renders TextDungeonC's always-visible character state — Status, Effects, Slots — fed only by the server's GMCP Feed. Server-side terms (Condition, Footing, Focus, Round Time, Active Effect, Slot) are TextDungeonC's and are used verbatim; this glossary holds only what the widget itself introduces.
+A MudForge plugin that renders TextDungeonC's always-visible character state — Status, Effects, Slots — and the last page read and quest pulled up — Page, Quest — fed only by the server's GMCP Feed. Server-side terms (Condition, Footing, Focus, Round Time, Active Effect, Slot) are TextDungeonC's and are used verbatim; this glossary holds only what the widget itself introduces.
 
 ## Language
 
@@ -43,3 +43,23 @@ _Avoid_: active, online
 **Severed**:
 A widget whose connection was lost while Live; it keeps the last-known values, Countdowns frozen where they stood, until the next connection returns it to Unfed.
 _Avoid_: stale, offline, disconnected (the connection's state, not the widget's)
+
+### Readers
+
+**Reader**:
+The Page or Quest widget: shows a document the Feed carried (`Writing.Read`, `Quest.Show`) as the server printed it, and keeps the ones before it in Recent.
+_Avoid_: viewer, panel
+
+**Recent**:
+A Reader's own newest-first list of the last ten documents it was fed this connection, one per page (or contents) of a Writing, one per quest title. A document fed again moves to the head rather than appearing twice.
+_Avoid_: history, log (the server's Quest Log is something else)
+
+**On show**:
+The Recent entry a Reader is displaying. A page read always goes on show; a quest goes on show when a different quest is pulled up, while a re-sent quest is refreshed in place and leaves whatever is on show alone. Only the head of a Quest Reader's Recent is kept current by the server; an older one is a snapshot as last shown.
+_Avoid_: selected, current
+
+### Windows bar
+
+**Windows bar**:
+The widget with one button per HUD window that opens it. It only opens, never hides: MudForge tells a plugin nothing when a window is closed from its own chrome, so a toggle could not know which way to go. The bar itself is shown on every start, because MudForge cannot yet bring back a custom window the player closed.
+_Avoid_: toolbar, menu

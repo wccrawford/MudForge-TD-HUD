@@ -1,4 +1,6 @@
 /* Inlined into every widget by tools/build.js as a <style> block ahead of its html. */
+/* the size, family and weight are the widget's own font (its settings cog), set on
+   the root by the wiring from getWidgetFont; everything inside sizes in em from it */
 html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25 "Segoe UI",system-ui,sans-serif;overflow:hidden}
 *{box-sizing:border-box}
 /* tier ramp: 1 best … 5 worst (Condition / Footing / Focus), red-first like the built-in gauge;

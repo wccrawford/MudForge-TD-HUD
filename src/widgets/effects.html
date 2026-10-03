@@ -10,12 +10,12 @@
   .e{display:flex;flex-direction:column;gap:2px}
   .e .l{display:grid;grid-template-columns:1fr auto;align-items:baseline;gap:8px}
   .e .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .e .t{color:var(--u);font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
+  .e .t{color:var(--u);font-size:.92em;font-weight:600;font-variant-numeric:tabular-nums}
   .e .h{height:3px;background:#30363d;border-radius:2px;overflow:hidden}
   .e .h div{height:100%;background:var(--u);transition:width .1s linear}
-  .empty{color:#6e7681;font-size:12px;font-style:italic}
+  .empty{color:#6e7681;font-size:.92em;font-style:italic}
 </style>
-<div class="hud hud-effects" data-state="unfed" data-mud-bind-attr="data-state:hudState">
+<div class="hud hud-effects" data-state="unfed" data-mud-bind-attr="data-state:hudState" data-mud-bind-style="font-size:fontSize;font-family:fontFamily;font-weight:fontWeight">
   <div class="empty" style="display:none" data-mud-bind-style="display:effEmpty">No effects</div>
   <div class="e" style="display:none" data-mud-bind-attr="data-urg:e1u" data-mud-bind-style="display:e1d">
     <div class="l"><span class="n" data-mud-bind="e1n"></span><span class="t" data-mud-bind="e1t"></span></div>

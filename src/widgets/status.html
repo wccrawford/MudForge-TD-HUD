@@ -3,20 +3,20 @@
      Unfed skeleton so the widget is right before any push lands. -->
 <style>
   .hud{display:flex;flex-direction:column;gap:5px;padding:2px 0}
-  .row{display:grid;grid-template-columns:66px 1fr 52px;align-items:center;gap:6px}
-  .lbl{color:#8b949e;font-size:12px}
-  .bar{position:relative;height:18px;background:#0d1117;border:1px solid #30363d;border-radius:3px;overflow:hidden}
+  .row{display:grid;grid-template-columns:5.6em 1fr 4.4em;align-items:center;gap:6px}
+  .lbl{color:#8b949e;font-size:.92em}
+  .bar{position:relative;height:1.4em;background:#0d1117;border:1px solid #30363d;border-radius:3px;overflow:hidden}
   .fill{position:absolute;top:0;bottom:0;left:0;background:var(--c,#555);transition:width .25s}
-  .word{position:absolute;inset:0;display:flex;align-items:center;padding-left:6px;font-size:12px;color:#fff;text-shadow:0 0 3px #000,0 0 2px #000;white-space:nowrap}
-  .num{color:#8b949e;font-size:12px;text-align:right;font-variant-numeric:tabular-nums}
-  .rt{position:relative;height:16px;background:#0d1117;border:1px solid #30363d;border-radius:3px;overflow:hidden;margin-top:2px}
+  .word{position:absolute;inset:0;display:flex;align-items:center;padding-left:6px;font-size:.92em;color:#fff;text-shadow:0 0 3px #000,0 0 2px #000;white-space:nowrap}
+  .num{color:#8b949e;font-size:.92em;text-align:right;font-variant-numeric:tabular-nums}
+  .rt{position:relative;height:1.25em;background:#0d1117;border:1px solid #30363d;border-radius:3px;overflow:hidden;margin-top:2px}
   .rtfill{position:absolute;top:0;bottom:0;left:0;background:var(--rt);transition:width .1s linear}
-  .rtsec{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff;text-shadow:0 0 3px #000}
-  .foot{display:flex;flex-direction:column;gap:1px;font-size:12px;color:#8b949e;margin-top:2px;white-space:nowrap}
+  .rtsec{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:.92em;color:#fff;text-shadow:0 0 3px #000}
+  .foot{display:flex;flex-direction:column;gap:1px;font-size:.92em;color:#8b949e;margin-top:2px;white-space:nowrap}
   .foot .l{display:flex;justify-content:space-between}
   .pw{color:var(--p)}
 </style>
-<div class="hud hud-status" data-state="unfed" data-mud-bind-attr="data-state:hudState">
+<div class="hud hud-status" data-state="unfed" data-mud-bind-attr="data-state:hudState" data-mud-bind-style="font-size:fontSize;font-family:fontFamily;font-weight:fontWeight">
   <div class="row"><span class="lbl">Condition</span>
     <div class="bar" data-mud-bind-attr="title:condTip"><div class="fill" data-mud-bind-attr="data-tier:condTier" data-mud-bind-style="width:condPct"></div><span class="word" data-mud-bind="condName"></span></div>
     <span class="num"><span data-mud-bind="condCur"></span>/<span data-mud-bind="condMax"></span></span></div>

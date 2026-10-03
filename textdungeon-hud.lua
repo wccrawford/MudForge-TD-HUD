@@ -6,7 +6,7 @@ plugin = {
   name = "textdungeon-hud",
   version = "0.1.0",
   author = "wccrawford",
-  description = "TextDungeon's Status, Effects and Slots as MudForge widgets, fed by the GMCP Feed.",
+  description = "TextDungeon's Status, Effects, Slots, Page and Quest as MudForge widgets, fed by the GMCP Feed.",
   settings = { saveState = true },
 }
 
@@ -401,11 +401,495 @@ end
 return M
 end)()
 
+-- lib/recent.lua
+__libs["recent"] = (function()
+  local require = __require
+-- Recent: the newest-first list of the last few documents a reader widget
+-- was fed, and which of them is on show (CONTEXT.md: Recent, On show).
+-- Pure Lua 5.1 library shared by pages.lua and quests.lua: each entry is
+-- the caller's table, found again by the `key` it was put under.
+local M = {}
+
+M.LIMIT = 10               -- entries kept; the oldest falls off the end
+
+function M.new(limit)
+  return { items = {}, at = 0, limit = limit or M.LIMIT }
+end
+
+local function indexOf(r, key)
+  for i, it in ipairs(r.items) do
+    if it.key == key then return i end
+  end
+  return nil
+end
+
+-- Where the entry under `key` stands (1 = newest), or nil.
+M.find = indexOf
+
+-- Put `entry` at the head under `key` and show it. An entry already under
+-- that key is taken out first, so a document re-fed moves up, never twice.
+function M.put(r, key, entry)
+  local i = indexOf(r, key)
+  if i ~= nil then table.remove(r.items, i) end
+  table.insert(r.items, 1, { key = key, entry = entry })
+  while #r.items > r.limit do table.remove(r.items) end
+  r.at = 1
+  return r
+end
+
+-- Replace the head's entry in place when it is under `key`; whatever is on
+-- show stays on show. Answers whether it did.
+function M.refresh(r, key, entry)
+  local head = r.items[1]
+  if head == nil or head.key ~= key then return false end
+  head.entry = entry
+  return true
+end
+
+-- The entry on show, or nil while Recent is empty.
+function M.shown(r)
+  local it = r.items[r.at]
+  return it and it.entry
+end
+
+function M.count(r)
+  return #r.items
+end
+
+-- Show entry `i` (1 = newest); out of range is ignored.
+function M.show(r, i)
+  if i ~= nil and i >= 1 and i <= #r.items then r.at = i end
+  return r
+end
+
+function M.older(r) return M.show(r, r.at + 1) end
+function M.newer(r) return M.show(r, r.at - 1) end
+
+-- Every entry, newest first, as { entry, ... }.
+function M.entries(r)
+  local out = {}
+  for i, it in ipairs(r.items) do out[i] = it.entry end
+  return out
+end
+
+return M
+end)()
+
+-- lib/doc.lua
+__libs["doc"] = (function()
+  local require = __require
+-- Doc: markup for the reader widgets (Page, Quest), whose content is
+-- rewritten whole on every change rather than flipped by bound values
+-- (ADR 0002). Pure Lua 5.1 library: everything here returns a string.
+-- Fed text is escaped on the way in; nothing fed ever reaches markup raw.
+local M = {}
+
+-- The twelve Roles a fed Span may carry (ADR 0058's role names); any other
+-- name is drawn plain rather than trusted into a class attribute.
+local ROLES = {
+  Item = true, Character = true, Place = true, Exit = true, Speech = true,
+  Refusal = true, Harm = true, Cue = true, Warning = true, Command = true,
+  Act = true, Heading = true,
+}
+
+-- Fed `lines` copied into plain tables. Feed arrays reach Lua 0-based
+-- under t[i] (wayfinder #6), so every list goes through ipairs at the door.
+function M.copy(lines)
+  local out = {}
+  for _, line in ipairs(lines or {}) do
+    local spans = {}
+    for _, sp in ipairs(line) do
+      if type(sp) == "table" then
+        spans[#spans + 1] = { text = sp.text, role = sp.role, hang = sp.hang }
+      end
+    end
+    out[#out + 1] = spans
+  end
+  return out
+end
+
+function M.escape(s)
+  s = tostring(s or "")
+  s = (s:gsub("&", "&amp;"))
+  s = (s:gsub("<", "&lt;"))
+  s = (s:gsub(">", "&gt;"))
+  s = (s:gsub('"', "&quot;"))
+  return s
+end
+
+-- A widget's own font, as getWidgetFont answers it (`{family, size, weight}`,
+-- the widget's settings cog), as the three bound style keys a bound
+-- widget's root carries: fontSize, fontFamily, fontWeight. Absent parts
+-- are left to the stylesheet ("" clears a bound style).
+function M.fontKeys(font)
+  font = font or {}
+  return {
+    fontSize = font.size ~= nil and (tostring(font.size) .. "px") or "",
+    fontFamily = font.family or "",
+    fontWeight = font.weight ~= nil and tostring(font.weight) or "",
+  }
+end
+
+-- The same font as an inline style attribute, for a widget whose markup
+-- is rewritten whole; "" when there is none.
+function M.fontStyle(font)
+  local k = M.fontKeys(font)
+  local out = {}
+  if k.fontSize ~= "" then out[#out + 1] = "font-size:" .. k.fontSize end
+  if k.fontFamily ~= "" then out[#out + 1] = "font-family:" .. k.fontFamily end
+  if k.fontWeight ~= "" then out[#out + 1] = "font-weight:" .. k.fontWeight end
+  if #out == 0 then return "" end
+  return ' style="' .. M.escape(table.concat(out, ";")) .. '"'
+end
+
+-- One fed line, a list of Spans `{text, role?}` or hangs `{hang = n}`: its
+-- words as role-classed spans, wrapped continuations starting at the last
+-- hang's column (ADR 0058: a line with none hangs at 0).
+function M.line(spans)
+  local out, hang = {}, 0
+  for _, sp in ipairs(spans or {}) do
+    if type(sp) == "table" then
+      if sp.hang ~= nil then
+        hang = tonumber(sp.hang) or 0
+      elseif sp.text ~= nil and sp.text ~= "" then
+        local text = M.escape(sp.text)
+        if sp.role ~= nil and ROLES[sp.role] then
+          out[#out + 1] = '<span class="r-' .. sp.role .. '">' .. text .. "</span>"
+        else
+          out[#out + 1] = text
+        end
+      end
+    end
+  end
+  local style = ""
+  if hang > 0 then
+    style = ' style="padding-left:' .. hang .. "ch;text-indent:-" .. hang .. 'ch"'
+  end
+  return '<div class="ln"' .. style .. ">" .. table.concat(out) .. "</div>"
+end
+
+-- Every fed line, in order.
+function M.lines(lines)
+  local out = {}
+  for _, l in ipairs(lines or {}) do out[#out + 1] = M.line(l) end
+  return table.concat(out)
+end
+
+-- A clickable control: `data-mud-action` fires the widget's `action` event
+-- (MudForge); a control that cannot act now is drawn dimmed with no action.
+function M.button(label, action, data, on, enabled, extra)
+  local cls = "btn" .. (on and " on" or "") .. (extra and (" " .. extra) or "")
+  if enabled == false then
+    return '<span class="' .. cls .. ' off">' .. label .. "</span>"
+  end
+  local d = data ~= nil and (' data-mud-data="' .. M.escape(data) .. '"') or ""
+  return '<span class="' .. cls .. '" data-mud-action="' .. action .. '"' .. d .. ">" .. label .. "</span>"
+end
+
+-- The reader frame: widget state for the shared dimming, a navigation bar
+-- over Recent, then the body.
+--   v = { state, at, count, listing, label, tools?, body, font? }
+-- `at`/`count` place the shown entry in Recent (1 = newest); `listing` is
+-- true while the Recent list is the body; `tools` is markup for the
+-- widget's own buttons, set just before Recent; `font` the widget's own
+-- (see fontStyle).
+function M.frame(v)
+  local bar = {
+    M.button("&lsaquo;", "older", nil, false, v.at < v.count, "nav"),
+    M.button("&rsaquo;", "newer", nil, false, v.at > 1, "nav"),
+    '<span class="pos">' .. (v.count > 0 and (v.at .. "/" .. v.count) or "") .. "</span>",
+    '<span class="lbl">' .. (v.label or "") .. "</span>",
+    v.tools or "",
+    M.button("Recent", "recent", nil, v.listing, v.count > 0),
+  }
+  return '<div class="hud rd" data-state="' .. v.state .. '"' .. M.fontStyle(v.font) .. ">"
+    .. '<div class="bar">' .. table.concat(bar) .. "</div>"
+    .. '<div class="body">' .. (v.body or "") .. "</div></div>"
+end
+
+-- The Recent list as a body: one row per entry, newest first, the shown
+-- one marked; a row opens its entry. rows = { {label, sub?}, ... }
+function M.recent(rows, at)
+  local out = {}
+  for i, row in ipairs(rows) do
+    local sub = row.sub and ('<span class="sub">' .. row.sub .. "</span>") or ""
+    out[#out + 1] = '<div class="row' .. (i == at and " cur" or "") .. '" data-mud-action="open" data-mud-data="' .. i .. '">'
+      .. '<span class="rl">' .. row.label .. "</span>" .. sub .. "</div>"
+  end
+  return table.concat(out)
+end
+
+-- The body of a widget with nothing to show yet.
+function M.empty(text)
+  return '<div class="none">' .. M.escape(text) .. "</div>"
+end
+
+return M
+end)()
+
+-- lib/pages.lua
+__libs["pages"] = (function()
+  local require = __require
+-- Pages: the view-model behind the Page widget - what `read` last printed
+-- (Writing.Read, a page or a table of contents), kept in Recent so the
+-- player can page back through what they read this connection.
+-- Pure Lua 5.1 library, same shape as slots.lua (new / feed / sever) plus
+-- act() for the widget's clicks and html() for its whole content (ADR 0002).
+local recent = require("recent")
+local doc = require("doc")
+
+local M = {}
+
+function M.new()
+  return { state = "unfed", recent = recent.new(), listing = false }
+end
+
+local function copyRows(pages)
+  local out = {}
+  for _, r in ipairs(pages or {}) do
+    if r.page ~= nil then
+      out[#out + 1] = { page = r.page, title = r.title or "", section = r.section, rung = r.rung }
+    end
+  end
+  return out
+end
+
+-- Writing.Read: `{kind = "page", writing, page, title, lines}` or
+-- `{kind = "contents", writing, pages}`. It answers a `read` the player just
+-- typed, so it always goes on show, even over an older entry being browsed.
+function M.read(s, pkg)
+  if pkg == nil or pkg.writing == nil then return s end
+  local e
+  if pkg.kind == "contents" then
+    e = { kind = "contents", writing = pkg.writing, rows = copyRows(pkg.pages) }
+    recent.put(s.recent, pkg.writing .. "#contents", e)
+  elseif pkg.kind == "page" then
+    e = { kind = "page", writing = pkg.writing, page = pkg.page, title = pkg.title or "", lines = doc.copy(pkg.lines) }
+    recent.put(s.recent, pkg.writing .. "#" .. tostring(pkg.page), e)
+  else
+    return s
+  end
+  s.listing = false
+  s.state = "live"
+  return s
+end
+
+-- Connection lost: Recent is kept, only the state changes.
+function M.sever(s)
+  if s.state == "live" then s.state = "severed" end
+  return s
+end
+
+-- A click in the widget (its `data-mud-action` / `data-mud-data`). Answers
+-- the command to send the MUD, if the click asks for one: a contents row
+-- reads its page, and Contents on a page reads its book's contents unless
+-- they are already in Recent, which it shows instead.
+function M.act(s, action, data)
+  local r = s.recent
+  if action == "older" then recent.older(r); s.listing = false
+  elseif action == "newer" then recent.newer(r); s.listing = false
+  elseif action == "recent" then s.listing = not s.listing and recent.count(r) > 0
+  elseif action == "open" then recent.show(r, tonumber(data)); s.listing = false
+  elseif action == "read" then
+    local e = recent.shown(r)
+    local n = tonumber(data)
+    if e ~= nil and e.kind == "contents" and n ~= nil then
+      return "read " .. e.writing .. " " .. n
+    end
+  elseif action == "contents" then
+    local e = recent.shown(r)
+    if e ~= nil and e.kind == "page" then
+      local i = recent.find(r, e.writing .. "#contents")
+      if i == nil then return "read " .. e.writing end
+      recent.show(r, i)
+      s.listing = false
+    end
+  end
+  return nil
+end
+
+local function label(e)
+  if e.kind == "contents" then return doc.escape(e.writing) .. " - contents" end
+  return doc.escape(e.writing) .. " - p. " .. doc.escape(e.page)
+end
+
+-- `read <book>`'s contents, as read prints them: section headings, then
+-- each page row clickable to read it, its rung in brackets.
+local function contents(e)
+  local out = { '<div class="ln"><span class="r-Heading">' .. doc.escape(e.writing) .. "</span></div>" }
+  local heading = nil
+  for _, row in ipairs(e.rows) do
+    if row.section ~= nil and row.section ~= heading then
+      heading = row.section
+      out[#out + 1] = '<div class="ln sec"><span class="r-Heading">' .. doc.escape(heading) .. "</span></div>"
+    end
+    local rung = row.rung ~= nil and ('  <span class="sub">(' .. doc.escape(row.rung) .. ")</span>") or ""
+    out[#out + 1] = '<div class="row" data-mud-action="read" data-mud-data="' .. doc.escape(row.page) .. '">'
+      .. '<span class="pn">' .. doc.escape(row.page) .. ".</span>"
+      .. '<span class="rl">' .. doc.escape(row.title) .. rung .. "</span></div>"
+  end
+  return table.concat(out)
+end
+
+-- The widget's whole content, in `font` (the widget's own, see doc.fontStyle).
+function M.html(s, font)
+  local r = s.recent
+  local n = recent.count(r)
+  local e = recent.shown(r)
+  local v = { state = s.state, at = r.at, count = n, listing = s.listing, font = font }
+  if e == nil then
+    v.body = doc.empty("Nothing read yet.")
+  elseif s.listing then
+    local rows = {}
+    for i, it in ipairs(recent.entries(r)) do
+      rows[i] = { label = label(it), sub = it.kind == "page" and doc.escape(it.title) or nil }
+    end
+    v.label = "Recent pages"
+    v.body = doc.recent(rows, r.at)
+  else
+    v.label = label(e)
+    v.body = e.kind == "contents" and contents(e) or doc.lines(e.lines)
+    if e.kind == "page" then v.tools = doc.button("Contents", "contents") end
+  end
+  return doc.frame(v)
+end
+
+return M
+end)()
+
+-- lib/quests.lua
+__libs["quests"] = (function()
+  local require = __require
+-- Quests: the view-model behind the Quest widget - the last quest the
+-- player pulled up (Quest.Show, kept current by the server), with the ones
+-- pulled up before it kept in Recent as they last stood.
+-- Pure Lua 5.1 library, same shape as pages.lua (ADR 0002).
+local recent = require("recent")
+local doc = require("doc")
+
+local M = {}
+
+function M.new()
+  return { state = "unfed", recent = recent.new(), listing = false }
+end
+
+-- Quest.Show `{title, status, lines}`. The server re-sends it unasked as the
+-- quest moves (and on a resync): the same quest at the head is refreshed in
+-- place and whatever the player is browsing stays on show. A different
+-- quest was just pulled up, so it goes on show.
+function M.show(s, pkg)
+  if pkg == nil or pkg.title == nil then return s end
+  local e = { title = pkg.title, status = pkg.status or "", lines = doc.copy(pkg.lines) }
+  if not recent.refresh(s.recent, pkg.title, e) then
+    recent.put(s.recent, pkg.title, e)
+    s.listing = false
+  end
+  s.state = "live"
+  return s
+end
+
+function M.sever(s)
+  if s.state == "live" then s.state = "severed" end
+  return s
+end
+
+-- A click in the widget; never asks the MUD for anything.
+function M.act(s, action, data)
+  local r = s.recent
+  if action == "older" then recent.older(r); s.listing = false
+  elseif action == "newer" then recent.newer(r); s.listing = false
+  elseif action == "recent" then s.listing = not s.listing and recent.count(r) > 0
+  elseif action == "open" then recent.show(r, tonumber(data)); s.listing = false
+  end
+  return nil
+end
+
+-- A status word as a class: `in progress` -> `st-in-progress`.
+local function status(e)
+  local cls = (e.status:gsub("[^%w]+", "-"))
+  return '<span class="st st-' .. cls .. '">' .. doc.escape(e.status) .. "</span>"
+end
+
+-- The widget's whole content, in `font` (the widget's own, see doc.fontStyle).
+function M.html(s, font)
+  local r = s.recent
+  local n = recent.count(r)
+  local e = recent.shown(r)
+  local v = { state = s.state, at = r.at, count = n, listing = s.listing, font = font }
+  if e == nil then
+    v.body = doc.empty("No quest pulled up yet.")
+  elseif s.listing then
+    local rows = {}
+    for i, it in ipairs(recent.entries(r)) do
+      rows[i] = { label = doc.escape(it.title), sub = status(it) }
+    end
+    v.label = "Recent quests"
+    v.body = doc.recent(rows, r.at)
+  else
+    v.label = status(e)
+    v.body = doc.lines(e.lines)
+    -- Only the head is kept current by the server; an older one is a snapshot.
+    if r.at > 1 then
+      v.body = v.body .. '<div class="note">As last shown. Type <span class="r-Command">quests show</span> to bring it up to date.</div>'
+    end
+  end
+  return doc.frame(v)
+end
+
+return M
+end)()
+
+-- lib/bar.lua
+__libs["bar"] = (function()
+  local require = __require
+-- Bar: the view-model behind the Windows bar - one button per HUD window,
+-- each opening its window. MudForge has no way yet to bring back a custom
+-- window the player closed, so this bar is how they do it, and the wiring
+-- shows the bar itself on every start (ADR 0002 for the markup). It only
+-- opens: MudForge tells a plugin nothing when a window is closed from its
+-- own chrome, so a toggle could not know which way to go.
+-- Pure Lua 5.1 library: act() answers which window a click opens.
+local doc = require("doc")
+
+local M = {}
+
+-- windows = { {name, title}, ... } in bar order.
+function M.new(windows)
+  local s = { windows = {} }
+  for i, w in ipairs(windows) do
+    s.windows[i] = { name = w.name, title = w.title }
+  end
+  return s
+end
+
+-- A click: `open` on a window the bar holds answers its name.
+function M.act(s, action, data)
+  if action ~= "open" then return nil end
+  for _, w in ipairs(s.windows) do
+    if w.name == data then return w.name end
+  end
+  return nil
+end
+
+-- The bar's whole content, in `font` (the widget's own, see doc.fontStyle).
+function M.html(s, font)
+  local out = {}
+  for _, w in ipairs(s.windows) do
+    out[#out + 1] = doc.button(doc.escape(w.title), "open", w.name)
+  end
+  return '<div class="wbar"' .. doc.fontStyle(font) .. ">" .. table.concat(out) .. "</div>"
+end
+
+return M
+end)()
+
 -- src/widgets/*.html, each with shared.css inlined
 __libs["widgets"] = {
   ["status"] = [==[
 <style>
 /* Inlined into every widget by tools/build.js as a <style> block ahead of its html. */
+/* the size, family and weight are the widget's own font (its settings cog), set on
+   the root by the wiring from getWidgetFont; everything inside sizes in em from it */
 html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25 "Segoe UI",system-ui,sans-serif;overflow:hidden}
 *{box-sizing:border-box}
 /* tier ramp: 1 best … 5 worst (Condition / Footing / Focus), red-first like the built-in gauge;
@@ -424,20 +908,20 @@ html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25
      Unfed skeleton so the widget is right before any push lands. -->
 <style>
   .hud{display:flex;flex-direction:column;gap:5px;padding:2px 0}
-  .row{display:grid;grid-template-columns:66px 1fr 52px;align-items:center;gap:6px}
-  .lbl{color:#8b949e;font-size:12px}
-  .bar{position:relative;height:18px;background:#0d1117;border:1px solid #30363d;border-radius:3px;overflow:hidden}
+  .row{display:grid;grid-template-columns:5.6em 1fr 4.4em;align-items:center;gap:6px}
+  .lbl{color:#8b949e;font-size:.92em}
+  .bar{position:relative;height:1.4em;background:#0d1117;border:1px solid #30363d;border-radius:3px;overflow:hidden}
   .fill{position:absolute;top:0;bottom:0;left:0;background:var(--c,#555);transition:width .25s}
-  .word{position:absolute;inset:0;display:flex;align-items:center;padding-left:6px;font-size:12px;color:#fff;text-shadow:0 0 3px #000,0 0 2px #000;white-space:nowrap}
-  .num{color:#8b949e;font-size:12px;text-align:right;font-variant-numeric:tabular-nums}
-  .rt{position:relative;height:16px;background:#0d1117;border:1px solid #30363d;border-radius:3px;overflow:hidden;margin-top:2px}
+  .word{position:absolute;inset:0;display:flex;align-items:center;padding-left:6px;font-size:.92em;color:#fff;text-shadow:0 0 3px #000,0 0 2px #000;white-space:nowrap}
+  .num{color:#8b949e;font-size:.92em;text-align:right;font-variant-numeric:tabular-nums}
+  .rt{position:relative;height:1.25em;background:#0d1117;border:1px solid #30363d;border-radius:3px;overflow:hidden;margin-top:2px}
   .rtfill{position:absolute;top:0;bottom:0;left:0;background:var(--rt);transition:width .1s linear}
-  .rtsec{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff;text-shadow:0 0 3px #000}
-  .foot{display:flex;flex-direction:column;gap:1px;font-size:12px;color:#8b949e;margin-top:2px;white-space:nowrap}
+  .rtsec{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:.92em;color:#fff;text-shadow:0 0 3px #000}
+  .foot{display:flex;flex-direction:column;gap:1px;font-size:.92em;color:#8b949e;margin-top:2px;white-space:nowrap}
   .foot .l{display:flex;justify-content:space-between}
   .pw{color:var(--p)}
 </style>
-<div class="hud hud-status" data-state="unfed" data-mud-bind-attr="data-state:hudState">
+<div class="hud hud-status" data-state="unfed" data-mud-bind-attr="data-state:hudState" data-mud-bind-style="font-size:fontSize;font-family:fontFamily;font-weight:fontWeight">
   <div class="row"><span class="lbl">Condition</span>
     <div class="bar" data-mud-bind-attr="title:condTip"><div class="fill" data-mud-bind-attr="data-tier:condTier" data-mud-bind-style="width:condPct"></div><span class="word" data-mud-bind="condName"></span></div>
     <span class="num"><span data-mud-bind="condCur"></span>/<span data-mud-bind="condMax"></span></span></div>
@@ -457,6 +941,8 @@ html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25
   ["effects"] = [==[
 <style>
 /* Inlined into every widget by tools/build.js as a <style> block ahead of its html. */
+/* the size, family and weight are the widget's own font (its settings cog), set on
+   the root by the wiring from getWidgetFont; everything inside sizes in em from it */
 html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25 "Segoe UI",system-ui,sans-serif;overflow:hidden}
 *{box-sizing:border-box}
 /* tier ramp: 1 best … 5 worst (Condition / Footing / Focus), red-first like the built-in gauge;
@@ -482,12 +968,12 @@ html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25
   .e{display:flex;flex-direction:column;gap:2px}
   .e .l{display:grid;grid-template-columns:1fr auto;align-items:baseline;gap:8px}
   .e .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .e .t{color:var(--u);font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
+  .e .t{color:var(--u);font-size:.92em;font-weight:600;font-variant-numeric:tabular-nums}
   .e .h{height:3px;background:#30363d;border-radius:2px;overflow:hidden}
   .e .h div{height:100%;background:var(--u);transition:width .1s linear}
-  .empty{color:#6e7681;font-size:12px;font-style:italic}
+  .empty{color:#6e7681;font-size:.92em;font-style:italic}
 </style>
-<div class="hud hud-effects" data-state="unfed" data-mud-bind-attr="data-state:hudState">
+<div class="hud hud-effects" data-state="unfed" data-mud-bind-attr="data-state:hudState" data-mud-bind-style="font-size:fontSize;font-family:fontFamily;font-weight:fontWeight">
   <div class="empty" style="display:none" data-mud-bind-style="display:effEmpty">No effects</div>
   <div class="e" style="display:none" data-mud-bind-attr="data-urg:e1u" data-mud-bind-style="display:e1d">
     <div class="l"><span class="n" data-mud-bind="e1n"></span><span class="t" data-mud-bind="e1t"></span></div>
@@ -535,6 +1021,8 @@ html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25
   ["slots"] = [==[
 <style>
 /* Inlined into every widget by tools/build.js as a <style> block ahead of its html. */
+/* the size, family and weight are the widget's own font (its settings cog), set on
+   the root by the wiring from getWidgetFont; everything inside sizes in em from it */
 html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25 "Segoe UI",system-ui,sans-serif;overflow:hidden}
 *{box-sizing:border-box}
 /* tier ramp: 1 best … 5 worst (Condition / Footing / Focus), red-first like the built-in gauge;
@@ -557,14 +1045,14 @@ html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25
   html,body{height:100%}
   .hud{display:flex;flex-direction:column;gap:1px;padding:2px 4px 2px 0;height:100%;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#30363d transparent}
   .s,.empty{flex-shrink:0}
-  .s{display:grid;grid-template-columns:64px 1fr;gap:6px;align-items:baseline;line-height:1.2}
-  .s .l{color:var(--l);font-size:12px;white-space:nowrap}
+  .s{display:grid;grid-template-columns:6.2em 1fr;gap:6px;align-items:baseline;line-height:1.2}
+  .s .l{color:var(--l);font-size:.92em;white-space:nowrap}
   .s .i{color:var(--i);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   /* slot occupancy: 1 = empty (dimmed; the lib supplies the "----" item) */
   [data-empty="1"]{--i:#4b5563;--l:#4b5563}[data-empty="0"]{--i:#c9d1d9;--l:#8b949e}
-  .empty{color:#6e7681;font-size:12px;font-style:italic}
+  .empty{color:#6e7681;font-size:.92em;font-style:italic}
 </style>
-<div class="hud hud-slots" data-state="unfed" data-mud-bind-attr="data-state:hudState">
+<div class="hud hud-slots" data-state="unfed" data-mud-bind-attr="data-state:hudState" data-mud-bind-style="font-size:fontSize;font-family:fontFamily;font-weight:fontWeight">
   <div class="empty" style="display:none" data-mud-bind-style="display:slotsEmpty">No slots</div>
   <div class="s" style="display:none" data-mud-bind-attr="data-empty:s1e" data-mud-bind-style="display:s1d"><span class="l" data-mud-bind="s1l"></span><span class="i" data-mud-bind="s1i"></span></div>
   <div class="s" style="display:none" data-mud-bind-attr="data-empty:s2e" data-mud-bind-style="display:s2d"><span class="l" data-mud-bind="s2l"></span><span class="i" data-mud-bind="s2i"></span></div>
@@ -585,28 +1073,124 @@ html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25
   <div class="empty" data-mud-bind="slotsMore"></div>
 </div>
 ]==],
+  ["reader"] = [==[
+<style>
+/* Inlined into every widget by tools/build.js as a <style> block ahead of its html. */
+/* the size, family and weight are the widget's own font (its settings cog), set on
+   the root by the wiring from getWidgetFont; everything inside sizes in em from it */
+html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25 "Segoe UI",system-ui,sans-serif;overflow:hidden}
+*{box-sizing:border-box}
+/* tier ramp: 1 best … 5 worst (Condition / Footing / Focus), red-first like the built-in gauge;
+   power 1 strongest … 4 slightest */
+[data-tier="1"]{--c:#3fb950}[data-tier="2"]{--c:#d4c33a}[data-tier="3"]{--c:#f0883e}[data-tier="4"]{--c:#f25c3c}[data-tier="5"]{--c:#e5232b}
+[data-ptier="1"]{--p:#c084fc}[data-ptier="2"]{--p:#a78bfa}[data-ptier="3"]{--p:#8b7cf6}[data-ptier="4"]{--p:#6e6ad6}
+.rtc{--rt:#58a6ff}
+/* widget states (CONTEXT.md): Unfed and Severed share one dimmed treatment; Live is full strength */
+.hud{transition:opacity .2s}
+.hud[data-state="unfed"],.hud[data-state="severed"]{opacity:.45}
+/* Countdown urgency (Effects): 0 normal, 1 under 5 s */
+[data-urg="0"]{--u:#58a6ff}[data-urg="1"]{--u:#e5232b}
+</style>
+<!-- Page and Quest widgets: styles only. Their content is this followed by
+     lib/pages.lua's or lib/quests.lua's html(), rewritten whole on every
+     change (ADR 0002). Fed text is monospace with pre-wrap so the server's
+     own indents and hangs (`padding-left` / `text-indent` in ch) line up. -->
+<style>
+  html,body{height:100%}
+  .rd{display:flex;flex-direction:column;height:100%}
+  .bar{display:flex;align-items:center;gap:4px;padding:2px 2px 4px;border-bottom:1px solid #30363d;flex-shrink:0}
+  .btn{cursor:pointer;user-select:none;padding:0 6px;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:.92em;line-height:1.5}
+  .btn:hover{background:#21262d}
+  .btn.on{background:#1f6feb33;border-color:#1f6feb}
+  .btn.off{cursor:default;color:#484f58;background:none}
+  .nav{font-size:1.25em;line-height:1;padding:1px 7px 3px}
+  .pos{color:#6e7681;font-size:.85em;min-width:2em}
+  .lbl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#8b949e;font-size:.92em}
+  .body{flex:1;overflow-y:auto;padding:4px 4px 6px 2px;scrollbar-width:thin;scrollbar-color:#30363d transparent;line-height:1.35;font-family:Consolas,"Cascadia Mono",monospace}
+  .ln{white-space:pre-wrap;overflow-wrap:anywhere;min-height:1.35em}
+  .sec{margin-top:4px}
+  .row{display:flex;gap:6px;align-items:baseline;cursor:pointer;padding:1px 2px;border-radius:2px}
+  .row:hover{background:#21262d}
+  .row.cur{background:#1f6feb22}
+  .rl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pn{color:#6e7681;min-width:3ch;text-align:right}
+  .sub{color:#6e7681;white-space:nowrap}
+  .none,.note{color:#6e7681;font-style:italic}
+  .note{margin-top:8px;font-size:.92em}
+  /* TextDungeonC's Truecolor Theme (server theme.rs) */
+  .r-Item{color:#5fd7d7}.r-Character{color:#e0c060}.r-Place{color:#7fc97f}.r-Exit{color:#6fa8dc}
+  .r-Speech{color:#eeeeee}.r-Command{color:#ffd787}.r-Act{color:#d787af}.r-Refusal{color:#c08cd0}
+  .r-Harm{color:#e06c6c}.r-Cue{color:#f09630}.r-Warning{color:#ff875f}.r-Heading{font-weight:bold}
+  .st-in-progress{color:#58a6ff}.st-completed{color:#3fb950}.st-failed{color:#e5232b}.st-abandoned{color:#6e7681}
+</style>
+]==],
+  ["bar"] = [==[
+<style>
+/* Inlined into every widget by tools/build.js as a <style> block ahead of its html. */
+/* the size, family and weight are the widget's own font (its settings cog), set on
+   the root by the wiring from getWidgetFont; everything inside sizes in em from it */
+html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25 "Segoe UI",system-ui,sans-serif;overflow:hidden}
+*{box-sizing:border-box}
+/* tier ramp: 1 best … 5 worst (Condition / Footing / Focus), red-first like the built-in gauge;
+   power 1 strongest … 4 slightest */
+[data-tier="1"]{--c:#3fb950}[data-tier="2"]{--c:#d4c33a}[data-tier="3"]{--c:#f0883e}[data-tier="4"]{--c:#f25c3c}[data-tier="5"]{--c:#e5232b}
+[data-ptier="1"]{--p:#c084fc}[data-ptier="2"]{--p:#a78bfa}[data-ptier="3"]{--p:#8b7cf6}[data-ptier="4"]{--p:#6e6ad6}
+.rtc{--rt:#58a6ff}
+/* widget states (CONTEXT.md): Unfed and Severed share one dimmed treatment; Live is full strength */
+.hud{transition:opacity .2s}
+.hud[data-state="unfed"],.hud[data-state="severed"]{opacity:.45}
+/* Countdown urgency (Effects): 0 normal, 1 under 5 s */
+[data-urg="0"]{--u:#58a6ff}[data-urg="1"]{--u:#e5232b}
+</style>
+<!-- Windows bar: styles only. Its content is this followed by lib/bar.lua's
+     html(), set once (ADR 0002): one button per HUD window, opening it. -->
+<style>
+  .wbar{display:flex;flex-wrap:wrap;gap:4px;padding:2px}
+  .btn{cursor:pointer;user-select:none;padding:0 8px;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:.92em;line-height:1.6}
+  .btn:hover{background:#21262d}
+</style>
+]==],
 }
 
 local require = __require
 
 -- src/textdungeon-hud.lua
--- TextDungeon HUD: Status / Effects / Slots widgets for MudForge, fed only by
--- TextDungeonC's GMCP Feed. This is the source; the file MudForge imports is
+-- TextDungeon HUD: Status / Effects / Slots widgets, the Page and Quest
+-- readers and the Windows bar for MudForge, fed only by TextDungeonC's GMCP
+-- Feed. This is the source; the file MudForge imports is
 -- the built textdungeon-hud.lua at the repo root (ADR 0001).
 
 local status = require("status")
 local effects = require("effects")
 local slots = require("slots")
-local widgets = require("widgets")   -- { status = html, effects = html, slots = html }, built from src/widgets/
+local pages = require("pages")
+local quests = require("quests")
+local bar = require("bar")
+local doc = require("doc")
+local widgets = require("widgets")   -- { status = html, ..., reader = css, bar = css }, built from src/widgets/
 
--- One top-anchored column on the right edge (wayfinder #14): Status / Effects /
--- Slots top-down, 12 px from the edge and between widgets. Heights include
--- MudForge's ~30 px title bar. Each widget ticket appends its entry here.
-local COLUMN = { width = 240, edge = 12, gap = 12 }
-local ORDER = {
-  { name = "status", title = "Status", height = 176 },
-  { name = "effects", title = "Effects", height = 164 },   -- five timer rows before scrolling
-  { name = "slots", title = "Slots", height = 256 },       -- the villager's twelve rows before scrolling
+-- Top-anchored columns from the right edge (wayfinder #14): the state column
+-- (Status / Effects / Slots) against the edge, the reader column (the
+-- Windows bar, Quest, Page) to its left, 12 px from the edge and between
+-- widgets. Heights include MudForge's title bar.
+local GAP = 12
+local COLUMNS = {
+  { width = 240, bound = true, widgets = {
+    { name = "status", title = "Status", height = 176 },
+    { name = "effects", title = "Effects", height = 164 },   -- five timer rows before scrolling
+    { name = "slots", title = "Slots", height = 256 },       -- the villager's twelve rows before scrolling
+  } },
+  { width = 360, widgets = {
+    { name = "bar", title = "Windows", height = 76 },
+    { name = "quest", title = "Quest", height = 300 },
+    { name = "page", title = "Page", height = 360 },
+  } },
+}
+-- What the Windows bar opens, in bar order; never the bar itself.
+local WINDOWS = {
+  { name = "status", title = "Status" }, { name = "effects", title = "Effects" },
+  { name = "slots", title = "Slots" }, { name = "quest", title = "Quest" },
+  { name = "page", title = "Page" },
 }
 
 local TICK_MS = 100       -- the shared Countdown tick
@@ -616,28 +1200,37 @@ local hud = {
   status = { id = nil, s = status.new() },
   effects = { id = nil, s = effects.new() },
   slots = { id = nil, s = slots.new() },
+  page = { id = nil, s = pages.new() },
+  quest = { id = nil, s = quests.new() },
+  bar = { id = nil, s = bar.new(WINDOWS) },
 }
 local tick = nil
 local repushDue = false   -- one re-push owed after init set the content
 
--- Create every widget in ORDER down the column. MudForge's saved placement
--- overrides these positions on later loads, so this only decides first install.
-local function createColumn()
+-- Create every widget down its column. MudForge's saved placement overrides
+-- these positions on later loads, so this only decides first install. A
+-- `bound` column's content is set once here; the reader column's widgets
+-- are rendered whole, below.
+local function createColumns()
   local win = getWindowSize() or {}
-  local x = (win.width or 0) - COLUMN.width - COLUMN.edge
-  if x < 0 then x = 0 end
-  local y = COLUMN.edge
-  for _, w in ipairs(ORDER) do
-    local id = createWidget({
-      type = "html",
-      name = w.name,
-      title = w.title,
-      position = { x = x, y = y },
-      size = { width = COLUMN.width, height = w.height },
-    })
-    setWidgetProperty(id, "content", widgets[w.name])
-    hud[w.name].id = id
-    y = y + w.height + COLUMN.gap
+  local right = (win.width or 0) - GAP
+  for _, col in ipairs(COLUMNS) do
+    local x = right - col.width
+    if x < 0 then x = 0 end
+    local y = GAP
+    for _, w in ipairs(col.widgets) do
+      local id = createWidget({
+        type = "html",
+        name = w.name,
+        title = w.title,
+        position = { x = x, y = y },
+        size = { width = col.width, height = w.height },
+      })
+      if col.bound then setWidgetProperty(id, "content", widgets[w.name]) end
+      hud[w.name].id = id
+      y = y + w.height + GAP
+    end
+    right = x - GAP
   end
 end
 
@@ -654,16 +1247,94 @@ local function pushSlots()
   setBoundValues(hud.slots.id, slots.keys(hud.slots.s))
 end
 
+-- Each widget's own font, from its settings cog. The markup sizes in em
+-- from it, so the HUD reads at the size the player set, like the stock
+-- panels; MudForge does not carry it into an html widget by itself.
+local function fontOf(name)
+  return getWidgetFont(hud[name].id)
+end
+
+-- The bound widgets take theirs as bound style keys on the root.
+local function pushFont(name)
+  setBoundValues(hud[name].id, doc.fontKeys(fontOf(name)))
+end
+
+-- The readers and the bar are rewritten whole on every change (ADR 0002).
+local function renderPage()
+  setWidgetProperty(hud.page.id, "content", widgets.reader .. pages.html(hud.page.s, fontOf("page")))
+end
+
+local function renderQuest()
+  setWidgetProperty(hud.quest.id, "content", widgets.reader .. quests.html(hud.quest.s, fontOf("quest")))
+end
+
+local function renderBar()
+  setWidgetProperty(hud.bar.id, "content", widgets.bar .. bar.html(hud.bar.s, fontOf("bar")))
+end
+
+-- How each widget follows a new font. An html widget gets no event when the
+-- player picks one (the resize event the docs promise is a canvas widget's),
+-- so the tick asks every FONT_TICKS; only a font that differs from the one
+-- applied re-applies, so a reader keeps its scroll otherwise.
+local FONT_TICKS = 10      -- once a second
+local REFONT = {
+  status = function() pushFont("status") end,
+  effects = function() pushFont("effects") end,
+  slots = function() pushFont("slots") end,
+  page = function() renderPage() end,
+  quest = function() renderQuest() end,
+  bar = function() renderBar() end,
+}
+local lastFont = {}         -- name -> the font css last applied
+local fontTicks = 0
+
+-- Note every widget's font as applied (the renders and pushes read it).
+local function noteFonts()
+  for name in pairs(REFONT) do lastFont[name] = fontOf(name).css end
+end
+
+local function checkFonts()
+  for name, refont in pairs(REFONT) do
+    local css = fontOf(name).css
+    if css ~= lastFont[name] then
+      lastFont[name] = css
+      refont()
+    end
+  end
+end
+
+-- MudForge cannot yet bring back a closed custom window, so the bar is shown
+-- on every start, even if the player closed it last time. force: overrides
+-- a hide made in the Plugin Manager too.
+local function showBar()
+  showWidget(hud.bar.id, true)
+end
+
 local function pushAll()
   local now = getCurrentTime()
   pushStatus(now)
   pushEffects(now)
   pushSlots()
+  pushFont("status")
+  pushFont("effects")
+  pushFont("slots")
+end
+
+-- The one re-push owed after init: bound values set with the content are
+-- lost (#6), and a saved layout may hide the bar after init ran.
+local function afterInit()
+  pushAll()
+  showBar()
 end
 
 -- Each widget is pushed on every tick while it has a Countdown running,
 -- including the tick that reaches Clear.
 local function onTick()
+  fontTicks = fontTicks + 1
+  if fontTicks >= FONT_TICKS then
+    fontTicks = 0
+    checkFonts()
+  end
   local now = getCurrentTime()
   local s = hud.status.s
   local counting = s.rt ~= nil
@@ -689,7 +1360,7 @@ local function ensureTick()
   tick = addTimer(TICK_MS, onTick, true)
   if tick ~= "" and repushDue then
     repushDue = false
-    addTimer(REPUSH_MS, pushAll, false)
+    addTimer(REPUSH_MS, afterInit, false)
   end
 end
 
@@ -699,12 +1370,42 @@ local function attach()
   hud.status.s = status.new()
   hud.effects.s = effects.new()
   hud.slots.s = slots.new()
+  hud.page.s = pages.new()
+  hud.quest.s = quests.new()
   pushAll()
+  renderPage()
+  renderQuest()
   stopTick()
 end
 
+-- Clicks inside a reader (`data-mud-action`): navigate Recent, or send the
+-- command the click asks for. Focus goes back to the command line either way.
+local function onReaderAction(w, lib, render)
+  registerWidgetEvent(hud[w].id, "action", function(d)
+    local cmd = lib.act(hud[w].s, d.action, d.data)
+    render()
+    if cmd ~= nil then send(cmd) end
+    focusPrompt()
+  end)
+end
+
+local function onBarAction()
+  registerWidgetEvent(hud.bar.id, "action", function(d)
+    -- force: brings back a window closed from its own chrome, and one
+    -- hidden in the Plugin Manager
+    local name = bar.act(hud.bar.s, d.action, d.data)
+    if name ~= nil then showWidget(hud[name].id, true) end
+    focusPrompt()
+  end)
+end
+
 function init()
-  createColumn()
+  createColumns()
+  renderBar()
+  noteFonts()
+  onReaderAction("page", pages, renderPage)
+  onReaderAction("quest", quests, renderQuest)
+  onBarAction()
 
   onGMCPUpdate("Char.Vitals", function(pkg)
     ensureTick()
@@ -728,8 +1429,19 @@ function init()
     slots.items(hud.slots.s, pkg)
     pushSlots()
   end)
+  onGMCPUpdate("Writing.Read", function(pkg)
+    ensureTick()
+    pages.read(hud.page.s, pkg)
+    renderPage()
+  end)
+  onGMCPUpdate("Quest.Show", function(pkg)
+    ensureTick()
+    quests.show(hud.quest.s, pkg)
+    renderQuest()
+  end)
 
   attach()
+  showBar()
   repushDue = true
   -- A hot-reload mid-session gets no feed until the server is asked; any
   -- Core.Hello makes TextDungeonC re-send every package with a fresh now_ms.
@@ -748,6 +1460,10 @@ function onDisconnect()
   status.sever(hud.status.s, now)
   effects.sever(hud.effects.s, now)
   slots.sever(hud.slots.s)
+  pages.sever(hud.page.s)
+  quests.sever(hud.quest.s)
   pushAll()
+  renderPage()
+  renderQuest()
   stopTick()
 end

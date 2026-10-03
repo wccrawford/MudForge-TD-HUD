@@ -14,8 +14,8 @@ const ROOT = path.join(__dirname, "..");
 const OUT = path.join(ROOT, "textdungeon-hud.lua");
 
 // Fixed dependency order: a lib may only require() libs listed before it.
-const LIBS = ["countdown", "status", "effects", "slots"];
-const WIDGETS = ["status", "effects", "slots"];
+const LIBS = ["countdown", "status", "effects", "slots", "recent", "doc", "pages", "quests", "bar"];
+const WIDGETS = ["status", "effects", "slots", "reader", "bar"];
 
 const read = rel => fs.readFileSync(path.join(ROOT, rel), "utf8").replace(/\r\n/g, "\n");
 

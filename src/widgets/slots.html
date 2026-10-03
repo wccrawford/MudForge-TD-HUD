@@ -7,14 +7,14 @@
   html,body{height:100%}
   .hud{display:flex;flex-direction:column;gap:1px;padding:2px 4px 2px 0;height:100%;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#30363d transparent}
   .s,.empty{flex-shrink:0}
-  .s{display:grid;grid-template-columns:64px 1fr;gap:6px;align-items:baseline;line-height:1.2}
-  .s .l{color:var(--l);font-size:12px;white-space:nowrap}
+  .s{display:grid;grid-template-columns:6.2em 1fr;gap:6px;align-items:baseline;line-height:1.2}
+  .s .l{color:var(--l);font-size:.92em;white-space:nowrap}
   .s .i{color:var(--i);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   /* slot occupancy: 1 = empty (dimmed; the lib supplies the "----" item) */
   [data-empty="1"]{--i:#4b5563;--l:#4b5563}[data-empty="0"]{--i:#c9d1d9;--l:#8b949e}
-  .empty{color:#6e7681;font-size:12px;font-style:italic}
+  .empty{color:#6e7681;font-size:.92em;font-style:italic}
 </style>
-<div class="hud hud-slots" data-state="unfed" data-mud-bind-attr="data-state:hudState">
+<div class="hud hud-slots" data-state="unfed" data-mud-bind-attr="data-state:hudState" data-mud-bind-style="font-size:fontSize;font-family:fontFamily;font-weight:fontWeight">
   <div class="empty" style="display:none" data-mud-bind-style="display:slotsEmpty">No slots</div>
   <div class="s" style="display:none" data-mud-bind-attr="data-empty:s1e" data-mud-bind-style="display:s1d"><span class="l" data-mud-bind="s1l"></span><span class="i" data-mud-bind="s1i"></span></div>
   <div class="s" style="display:none" data-mud-bind-attr="data-empty:s2e" data-mud-bind-style="display:s2d"><span class="l" data-mud-bind="s2l"></span><span class="i" data-mud-bind="s2i"></span></div>
