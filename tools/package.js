@@ -5,16 +5,21 @@
 //
 //   textdungeon-hud-<version>.mfp   the bundle: package.json,
 //                                   plugins/manifest.json, plugins/<id>.lua
-//   client-package.json             the GMCP Client.Package advertisement
-//                                   for the server to send, sha256 included
+//   client-package.json             the GMCP Client.Package advertisement,
+//                                   sha256 included - only with --url
+//
+// TextDungeonC serves the .mfp from its own web listener and builds the
+// advertisement itself (its own URL, the sha256 of the file it serves), so
+// the .mfp is the deliverable; --url writes a ready-made advertisement for
+// serving it from somewhere else, or to check the server's against.
 //
 // The version is the plugin block's, so the advertised version, the
 // manifest's and the plugin's can never disagree (a mismatch re-prompts the
 // player on every login). The bundle is byte-for-byte reproducible: fixed
 // entry order and timestamps, so the same source gives the same sha256.
 //
-//   --url   where the .mfp will be served (HTTPS). Default: this repo's
-//           GitHub Release asset for the version, tag v<version>.
+//   --url   where the .mfp will be served (HTTPS only - MudForge refuses
+//           anything else). Ending in "/", the file name is appended.
 const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
@@ -22,7 +27,6 @@ const crypto = require("crypto");
 
 const ROOT = path.join(__dirname, "..");
 const DIST = path.join(ROOT, "dist");
-const REPO = "https://github.com/wccrawford/MudForge-TD-HUD";
 
 // Stable forever: changing it orphans every existing install (MudForge
 // recognises an update by it).
@@ -105,8 +109,11 @@ if (npmVersion !== meta.version) {
 }
 const file = meta.id + "-" + meta.version + ".mfp";
 const i = args.indexOf("--url");
-const url = i !== -1 ? args[i + 1] : REPO + "/releases/download/v" + meta.version + "/" + file;
-if (!/^https:\/\//.test(url || "")) throw new Error("--url must be an https URL (MudForge downloads packages over HTTPS only)");
+let url = i !== -1 ? args[i + 1] : null;
+if (url !== null) {
+  if (!/^https:\/\//.test(url || "")) throw new Error("--url must be an https URL (MudForge downloads packages over HTTPS only)");
+  if (url.endsWith("/")) url += file;
+}
 
 const manifest = {
   formatVersion: 1,
@@ -134,19 +141,24 @@ const bytes = zip([
 ]);
 const sha256 = crypto.createHash("sha256").update(bytes).digest("hex");
 
-const advert = {
-  client: "MudForge",
-  name: PACKAGE_NAME,
-  version: meta.version,
-  url,
-  sha256,
-  description: meta.description,
-  minClientVersion: MIN_CLIENT,
-};
-
 fs.mkdirSync(DIST, { recursive: true });
 fs.writeFileSync(path.join(DIST, file), bytes);
-fs.writeFileSync(path.join(DIST, "client-package.json"), JSON.stringify(advert, null, 2) + "\n");
 console.log("wrote dist/" + file + " (" + bytes.length + " bytes)");
-console.log("sha256 " + sha256);
-console.log("advertise: Client.Package " + JSON.stringify(advert));
+console.log("version " + meta.version + "  sha256 " + sha256);
+
+const advertFile = path.join(DIST, "client-package.json");
+if (url === null) {
+  if (fs.existsSync(advertFile)) fs.unlinkSync(advertFile);   // never leave one from an older build
+} else {
+  const advert = {
+    client: "MudForge",
+    name: PACKAGE_NAME,
+    version: meta.version,
+    url,
+    sha256,
+    description: meta.description,
+    minClientVersion: MIN_CLIENT,
+  };
+  fs.writeFileSync(advertFile, JSON.stringify(advert, null, 2) + "\n");
+  console.log("advertise: Client.Package " + JSON.stringify(advert));
+}

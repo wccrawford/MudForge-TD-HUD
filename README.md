@@ -18,7 +18,7 @@ npm install               # once; luaparse, the parser MudForge itself uses
 npm test                  # parse gate + LuaJIT asserts + stale-build check
 npm run build             # src/ + lib/ -> textdungeon-hud.lua (commit it)
 npm run deploy            # build, then copy into MudForge's watched plugins folder
-npm run package           # build, then dist/<id>-<version>.mfp + dist/client-package.json
+npm run package           # build, then dist/<id>-<version>.mfp (the server package)
 ```
 
 `src/textdungeon-hud.lua` is the plugin; `lib/*.lua` are pure libraries it `require()`s; `src/widgets/*.html` (+ `shared.css`) are each widget's content. `tools/build.js` inlines all of it into the root `textdungeon-hud.lua` — edit the sources, never the built file (see `docs/adr/0001-inlined-library-build.md`).
@@ -31,8 +31,14 @@ The version lives in the `plugin = { ... }` block of `src/textdungeon-hud.lua` a
 
 ```
 npm test && npm run package
-git tag v<version> && git push origin v<version>
-gh release create v<version> dist/textdungeon-hud-<version>.mfp
 ```
 
-`dist/client-package.json` is then the GMCP `Client.Package` payload for TextDungeonC to send at login. Its `url` defaults to that release asset (`--url` on `tools/package.js` overrides it), and its `sha256` changes with every release, so the server's copy must be updated each time. See `docs/adr/0003-shipped-as-a-server-package.md`.
+Hand `dist/textdungeon-hud-<version>.mfp` to TextDungeonC, which serves it from its own web listener and advertises it at login with GMCP `Client.Package`:
+
+```json
+{"client": "MudForge", "name": "TextDungeon HUD", "version": "<the manifest's version>",
+ "url": "https://<the MUD's web host>/<path>/textdungeon-hud-<version>.mfp",
+ "sha256": "<lowercase hex sha256 of the served file>", "minClientVersion": "1.2.2490"}
+```
+
+The URL must be HTTPS (MudForge refuses anything else), `version` must equal the manifest's or players are re-prompted every login, and `name` must stay `TextDungeon HUD`, since MudForge recognises an installed package partly by it. `npm run package` prints the version and sha256 to check the server's advertisement against; `node tools/package.js --url https://<host>/<path>/` also writes the whole advertisement to `dist/client-package.json`. See `docs/adr/0003-shipped-as-a-server-package.md`.
