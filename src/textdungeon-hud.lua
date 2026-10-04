@@ -5,7 +5,7 @@
 plugin = {
   id = "textdungeon-hud",
   name = "textdungeon-hud",
-  version = "0.2.0",
+  version = "0.3.0",
   author = "wccrawford",
   description = "TextDungeon's Status, Effects, Slots, Page and Quest as MudForge widgets, fed by the GMCP Feed.",
   settings = { saveState = true },
@@ -229,13 +229,16 @@ local function attach()
   stopTick()
 end
 
--- Clicks inside a reader (`data-mud-action`): navigate Recent, or send the
--- command the click asks for. Focus goes back to the command line either way.
+-- Clicks inside a reader (`data-mud-action`): navigate Recent, or send what
+-- the click asks for - a command typed for the player, or a side-band
+-- request `{gmcp, data}` (Page.Read), which prints nothing. Focus goes back
+-- to the command line either way.
 local function onReaderAction(w, lib, render)
   registerWidgetEvent(hud[w].id, "action", function(d)
     local cmd = lib.act(hud[w].s, d.action, d.data)
     render()
-    if cmd ~= nil then send(cmd) end
+    if type(cmd) == "table" then sendGMCP(cmd.gmcp, cmd.data)
+    elseif cmd ~= nil then send(cmd) end
     focusPrompt()
   end)
 end
@@ -283,6 +286,11 @@ function init()
   onGMCPUpdate("Writing.Read", function(pkg)
     ensureTick()
     pages.read(hud.page.s, pkg)
+    renderPage()
+  end)
+  onGMCPUpdate("Page.Refused", function(pkg)
+    ensureTick()
+    pages.refused(hud.page.s, pkg)
     renderPage()
   end)
   onGMCPUpdate("Quest.Show", function(pkg)

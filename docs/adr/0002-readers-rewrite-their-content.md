@@ -5,7 +5,7 @@ The Status, Effects and Slots widgets set their content once and flip a fixed po
 ## Consequences
 
 - Fed text reaches markup only through `doc.escape`, and a Span's role only through a fixed list of the server's twelve Role names, since content is HTML rather than bound text.
-- Clicks come back through `data-mud-action` / `data-mud-data` and the widget's `action` event; the libs' `act()` answers any command to send, so navigation is plain `assert` tests.
+- Clicks come back through `data-mud-action` / `data-mud-data` and the widget's `action` event; the libs' `act()` answers what to send, a command typed for the player or a side-band request (the Page's `Page.Read`, which prints nothing), so navigation is plain `assert` tests.
 - A rewrite resets the widget's scroll to the top, which is wanted for a new page and accepted for a Recent click.
 - Bound values are not used in these widgets, so the lost-first-push re-push (#6) does not apply to them.
 - Every widget takes its own font (its settings cog) from `getWidgetFont` and sizes in `em` from it; MudForge does not carry that font into an html widget's content. The readers and the bar write it into their markup; the bound widgets take it as bound style keys on their root. No event announces a font change to an html widget, so the tick re-reads every widget's font once a second and re-applies only a changed one.

@@ -58,6 +58,10 @@ _Avoid_: history, log (the server's Quest Log is something else)
 The Recent entry a Reader is displaying. A page read always goes on show; a quest goes on show when a different quest is pulled up, while a re-sent quest is refreshed in place and leaves whatever is on show alone. Only the head of a Quest Reader's Recent is kept current by the server; an older one is a snapshot as last shown.
 _Avoid_: selected, current
 
+**Turn**:
+The Page Reader asking the server for the page before or after the one on show (`Page.Read`), on the side band, so no prose scrolls past and nothing is typed. It goes to the nearest page the book's contents list when they are in Recent, else to the next number. The page that answers goes on show like any page read; a refusal (`Page.Refused`) is shown over the page on show until the next click.
+_Avoid_: flip, next/previous (Recent's arrows, which move through what was already read)
+
 ### Windows bar
 
 **Windows bar**:

@@ -1,6 +1,7 @@
 -- Pages: the view-model behind the Page widget - what `read` last printed
 -- (Writing.Read, a page or a table of contents), kept in Recent so the
--- player can page back through what they read this connection.
+-- player can page back through what they read this connection, and turned
+-- on the side band (Page.Read) without the prose scrolling past them.
 -- Pure Lua 5.1 library, same shape as slots.lua (new / feed / sever) plus
 -- act() for the widget's clicks and html() for its whole content (ADR 0002).
 local recent = require("recent")
@@ -38,8 +39,43 @@ function M.read(s, pkg)
     return s
   end
   s.listing = false
+  s.refusal = nil
   s.state = "live"
   return s
+end
+
+-- Page.Refused `{writing, page?, text}`: a Page.Read the server would not
+-- answer, with the words `read` would have printed. Shown over whatever is
+-- on show, which stays, until the next click or page read.
+function M.refused(s, pkg)
+  if pkg == nil or pkg.text == nil then return s end
+  s.refusal = tostring(pkg.text)
+  return s
+end
+
+-- A Page.Read request for the wiring to send: page `n` of `writing`, or its
+-- contents when `n` is nil.
+local function ask(writing, n)
+  return { gmcp = "Page.Read", data = { writing = writing, page = n } }
+end
+
+-- The page a turn from page entry `e` reaches, `step` -1 or +1, or nil.
+-- With the book's contents in Recent it is the nearest page they list that
+-- way; without, the next number, never below 1.
+local function turnTo(r, e, step)
+  local n = tonumber(e.page)
+  if n == nil then return nil end
+  local i = recent.find(r, e.writing .. "#contents")
+  if i == nil then
+    if n + step < 1 then return nil end
+    return n + step
+  end
+  local best = nil
+  for _, row in ipairs(recent.entries(r)[i].rows) do
+    local p = tonumber(row.page)
+    if p ~= nil and (p - n) * step > 0 and (best == nil or (p - best) * step < 0) then best = p end
+  end
+  return best
 end
 
 -- Connection lost: Recent is kept, only the state changes.
@@ -49,11 +85,13 @@ function M.sever(s)
 end
 
 -- A click in the widget (its `data-mud-action` / `data-mud-data`). Answers
--- the command to send the MUD, if the click asks for one: a contents row
--- reads its page, and Contents on a page reads its book's contents unless
--- they are already in Recent, which it shows instead.
+-- the Page.Read request to send, if the click asks for one: a contents row
+-- reads its page, a turn reads the page it names, and Contents on a page
+-- reads its book's contents unless they are already in Recent, which it
+-- shows instead.
 function M.act(s, action, data)
   local r = s.recent
+  s.refusal = nil
   if action == "older" then recent.older(r); s.listing = false
   elseif action == "newer" then recent.newer(r); s.listing = false
   elseif action == "recent" then s.listing = not s.listing and recent.count(r) > 0
@@ -62,13 +100,19 @@ function M.act(s, action, data)
     local e = recent.shown(r)
     local n = tonumber(data)
     if e ~= nil and e.kind == "contents" and n ~= nil then
-      return "read " .. e.writing .. " " .. n
+      return ask(e.writing, n)
+    end
+  elseif action == "turn" then
+    local e = recent.shown(r)
+    local n = tonumber(data)
+    if e ~= nil and e.kind == "page" and not s.listing and n ~= nil then
+      return ask(e.writing, n)
     end
   elseif action == "contents" then
     local e = recent.shown(r)
     if e ~= nil and e.kind == "page" then
       local i = recent.find(r, e.writing .. "#contents")
-      if i == nil then return "read " .. e.writing end
+      if i == nil then return ask(e.writing, nil) end
       recent.show(r, i)
       s.listing = false
     end
@@ -99,6 +143,15 @@ local function contents(e)
   return table.concat(out)
 end
 
+-- A page's foot: turn back on the left, on on the right, each to the page
+-- it names; a way with no page is left out.
+local function foot(r, e)
+  local back, on = turnTo(r, e, -1), turnTo(r, e, 1)
+  return (back and doc.button("&lsaquo; p. " .. back, "turn", back) or "")
+    .. '<span class="gap"></span>'
+    .. (on and doc.button("p. " .. on .. " &rsaquo;", "turn", on) or "")
+end
+
 -- The widget's whole content, in `font` (the widget's own, see doc.fontStyle).
 function M.html(s, font)
   local r = s.recent
@@ -117,7 +170,13 @@ function M.html(s, font)
   else
     v.label = label(e)
     v.body = e.kind == "contents" and contents(e) or doc.lines(e.lines)
-    if e.kind == "page" then v.tools = doc.button("Contents", "contents") end
+    if e.kind == "page" then
+      v.tools = doc.button("Contents", "contents")
+      v.foot = foot(r, e)
+    end
+  end
+  if s.refusal ~= nil then
+    v.body = '<div class="note r-Refusal">' .. doc.escape(s.refusal) .. "</div>" .. v.body
   end
   return doc.frame(v)
 end

@@ -108,11 +108,11 @@ end
 
 -- The reader frame: widget state for the shared dimming, a navigation bar
 -- over Recent, then the body.
---   v = { state, at, count, listing, label, tools?, body, font? }
+--   v = { state, at, count, listing, label, tools?, body, foot?, font? }
 -- `at`/`count` place the shown entry in Recent (1 = newest); `listing` is
 -- true while the Recent list is the body; `tools` is markup for the
--- widget's own buttons, set just before Recent; `font` the widget's own
--- (see fontStyle).
+-- widget's own buttons, set just before Recent; `foot` markup for a bar
+-- under the body; `font` the widget's own (see fontStyle).
 function M.frame(v)
   local bar = {
     M.button("&lsaquo;", "older", nil, false, v.at < v.count, "nav"),
@@ -124,7 +124,9 @@ function M.frame(v)
   }
   return '<div class="hud rd" data-state="' .. v.state .. '"' .. M.fontStyle(v.font) .. ">"
     .. '<div class="bar">' .. table.concat(bar) .. "</div>"
-    .. '<div class="body">' .. (v.body or "") .. "</div></div>"
+    .. '<div class="body">' .. (v.body or "") .. "</div>"
+    .. (v.foot and ('<div class="bar foot">' .. v.foot .. "</div>") or "")
+    .. "</div>"
 end
 
 -- The Recent list as a body: one row per entry, newest first, the shown

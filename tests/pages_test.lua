@@ -79,7 +79,13 @@ eq(n, 1, "a section heads its rows once")
 has(h, "Ropework", "second section")
 has(h, 'data-mud-action="read" data-mud-data="1"', "row reads its page")
 has(h, "(2)", "rung")
-eq(pages.act(s, "read", "3"), "read a recipe book 3", "a row's click reads its page")
+local function asks(req, writing, n, label)
+  assert(type(req) == "table", label .. ": expected a request, got " .. tostring(req))
+  eq(req.gmcp, "Page.Read", label .. " package")
+  eq(req.data.writing, writing, label .. " writing")
+  eq(req.data.page, n, label .. " page")
+end
+asks(pages.act(s, "read", "3"), "a recipe book", 3, "a row's click reads its page on the side band")
 eq(pages.act(s, "read", "x"), nil, "a bad page sends nothing")
 
 -- A row's click on a page (not contents) sends nothing
@@ -106,7 +112,57 @@ has(h, "3/3", "the contents' place in Recent")
 pages.act(s, "newer")
 pages.act(s, "newer")
 has(pages.html(s), "a chalked slate - p. 3", "on the slate's page")
-eq(pages.act(s, "contents"), "read a chalked slate", "contents not in Recent: read them")
+asks(pages.act(s, "contents"), SLATE, nil, "contents not in Recent: ask for them")
+
+-- Turning pages: a page's foot turns to page - 1 / + 1, never below 1
+s = pages.new()
+pages.read(s, page(3, "Forging", "Heat."))
+h = pages.html(s)
+has(h, 'data-mud-action="turn" data-mud-data="2"', "turn back to p. 2")
+has(h, 'data-mud-action="turn" data-mud-data="4"', "turn on to p. 4")
+asks(pages.act(s, "turn", "4"), SLATE, 4, "turn asks for the page")
+eq(pages.act(s, "turn", "x"), nil, "a bad turn sends nothing")
+pages.read(s, page(1, "Smelting", "Melt."))
+h = pages.html(s)
+lacks(h, 'data-mud-data="0"', "no page before 1")
+has(h, 'data-mud-action="turn" data-mud-data="2"', "p. 1 turns on to 2")
+
+-- With the book's contents in Recent, a turn goes to the next listed page,
+-- and the last listed page has nothing after it
+s = pages.new()
+pages.read(s, { kind = "contents", writing = "a recipe book", pages = {
+  { page = 1, title = "Iron nails" }, { page = 3, title = "Rope" }, { page = 4, title = "Knots" } } })
+pages.read(s, { kind = "page", writing = "a recipe book", page = 3, title = "Rope", lines = {} })
+h = pages.html(s)
+has(h, 'data-mud-action="turn" data-mud-data="1"', "back skips the unlisted page")
+has(h, 'data-mud-action="turn" data-mud-data="4"', "on to the next listed")
+pages.read(s, { kind = "page", writing = "a recipe book", page = 4, title = "Knots", lines = {} })
+h = pages.html(s)
+lacks(h, 'data-mud-data="5"', "nothing after the last listed page")
+has(h, 'data-mud-action="turn" data-mud-data="3"', "back from the last")
+
+-- No turning on contents or the Recent list
+pages.act(s, "recent")
+lacks(pages.html(s), 'data-mud-action="turn"', "no turns on the Recent list")
+pages.act(s, "open", "3")
+lacks(pages.html(s), 'data-mud-action="turn"', "no turns on contents")
+eq(pages.act(s, "turn", "2"), nil, "turn only from a page")
+
+-- Page.Refused: its words shown over what is on show, which stays; gone on
+-- the next click or the next page read
+pages.read(s, { kind = "page", writing = "a recipe book", page = 4, title = "Knots", lines = {} })
+pages.refused(s, { writing = "a recipe book", page = 5, text = "There is no page 5 in <it>." })
+h = pages.html(s)
+has(h, "There is no page 5 in &lt;it&gt;.", "refusal shown, escaped")
+has(h, "a recipe book - p. 4", "the page stays on show")
+pages.act(s, "older")
+lacks(pages.html(s), "There is no page 5", "a click clears the refusal")
+pages.refused(s, { writing = "a recipe book", text = "You don't see that here." })
+pages.read(s, { kind = "page", writing = "a recipe book", page = 3, title = "Rope", lines = {} })
+lacks(pages.html(s), "You don't see that", "a page read clears the refusal")
+pages.refused(s, nil)
+pages.refused(s, { writing = "x" })
+lacks(pages.html(s), 'class="note', "malformed refusals ignored")
 
 -- Severed keeps Recent; a new() is a fresh reader
 pages.sever(s)

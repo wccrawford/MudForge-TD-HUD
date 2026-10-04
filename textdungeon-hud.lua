@@ -4,7 +4,7 @@
 plugin = {
   id = "textdungeon-hud",
   name = "textdungeon-hud",
-  version = "0.2.0",
+  version = "0.3.0",
   author = "wccrawford",
   description = "TextDungeon's Status, Effects, Slots, Page and Quest as MudForge widgets, fed by the GMCP Feed.",
   settings = { saveState = true },
@@ -588,11 +588,11 @@ end
 
 -- The reader frame: widget state for the shared dimming, a navigation bar
 -- over Recent, then the body.
---   v = { state, at, count, listing, label, tools?, body, font? }
+--   v = { state, at, count, listing, label, tools?, body, foot?, font? }
 -- `at`/`count` place the shown entry in Recent (1 = newest); `listing` is
 -- true while the Recent list is the body; `tools` is markup for the
--- widget's own buttons, set just before Recent; `font` the widget's own
--- (see fontStyle).
+-- widget's own buttons, set just before Recent; `foot` markup for a bar
+-- under the body; `font` the widget's own (see fontStyle).
 function M.frame(v)
   local bar = {
     M.button("&lsaquo;", "older", nil, false, v.at < v.count, "nav"),
@@ -604,7 +604,9 @@ function M.frame(v)
   }
   return '<div class="hud rd" data-state="' .. v.state .. '"' .. M.fontStyle(v.font) .. ">"
     .. '<div class="bar">' .. table.concat(bar) .. "</div>"
-    .. '<div class="body">' .. (v.body or "") .. "</div></div>"
+    .. '<div class="body">' .. (v.body or "") .. "</div>"
+    .. (v.foot and ('<div class="bar foot">' .. v.foot .. "</div>") or "")
+    .. "</div>"
 end
 
 -- The Recent list as a body: one row per entry, newest first, the shown
@@ -632,7 +634,8 @@ __libs["pages"] = (function()
   local require = __require
 -- Pages: the view-model behind the Page widget - what `read` last printed
 -- (Writing.Read, a page or a table of contents), kept in Recent so the
--- player can page back through what they read this connection.
+-- player can page back through what they read this connection, and turned
+-- on the side band (Page.Read) without the prose scrolling past them.
 -- Pure Lua 5.1 library, same shape as slots.lua (new / feed / sever) plus
 -- act() for the widget's clicks and html() for its whole content (ADR 0002).
 local recent = require("recent")
@@ -670,8 +673,43 @@ function M.read(s, pkg)
     return s
   end
   s.listing = false
+  s.refusal = nil
   s.state = "live"
   return s
+end
+
+-- Page.Refused `{writing, page?, text}`: a Page.Read the server would not
+-- answer, with the words `read` would have printed. Shown over whatever is
+-- on show, which stays, until the next click or page read.
+function M.refused(s, pkg)
+  if pkg == nil or pkg.text == nil then return s end
+  s.refusal = tostring(pkg.text)
+  return s
+end
+
+-- A Page.Read request for the wiring to send: page `n` of `writing`, or its
+-- contents when `n` is nil.
+local function ask(writing, n)
+  return { gmcp = "Page.Read", data = { writing = writing, page = n } }
+end
+
+-- The page a turn from page entry `e` reaches, `step` -1 or +1, or nil.
+-- With the book's contents in Recent it is the nearest page they list that
+-- way; without, the next number, never below 1.
+local function turnTo(r, e, step)
+  local n = tonumber(e.page)
+  if n == nil then return nil end
+  local i = recent.find(r, e.writing .. "#contents")
+  if i == nil then
+    if n + step < 1 then return nil end
+    return n + step
+  end
+  local best = nil
+  for _, row in ipairs(recent.entries(r)[i].rows) do
+    local p = tonumber(row.page)
+    if p ~= nil and (p - n) * step > 0 and (best == nil or (p - best) * step < 0) then best = p end
+  end
+  return best
 end
 
 -- Connection lost: Recent is kept, only the state changes.
@@ -681,11 +719,13 @@ function M.sever(s)
 end
 
 -- A click in the widget (its `data-mud-action` / `data-mud-data`). Answers
--- the command to send the MUD, if the click asks for one: a contents row
--- reads its page, and Contents on a page reads its book's contents unless
--- they are already in Recent, which it shows instead.
+-- the Page.Read request to send, if the click asks for one: a contents row
+-- reads its page, a turn reads the page it names, and Contents on a page
+-- reads its book's contents unless they are already in Recent, which it
+-- shows instead.
 function M.act(s, action, data)
   local r = s.recent
+  s.refusal = nil
   if action == "older" then recent.older(r); s.listing = false
   elseif action == "newer" then recent.newer(r); s.listing = false
   elseif action == "recent" then s.listing = not s.listing and recent.count(r) > 0
@@ -694,13 +734,19 @@ function M.act(s, action, data)
     local e = recent.shown(r)
     local n = tonumber(data)
     if e ~= nil and e.kind == "contents" and n ~= nil then
-      return "read " .. e.writing .. " " .. n
+      return ask(e.writing, n)
+    end
+  elseif action == "turn" then
+    local e = recent.shown(r)
+    local n = tonumber(data)
+    if e ~= nil and e.kind == "page" and not s.listing and n ~= nil then
+      return ask(e.writing, n)
     end
   elseif action == "contents" then
     local e = recent.shown(r)
     if e ~= nil and e.kind == "page" then
       local i = recent.find(r, e.writing .. "#contents")
-      if i == nil then return "read " .. e.writing end
+      if i == nil then return ask(e.writing, nil) end
       recent.show(r, i)
       s.listing = false
     end
@@ -731,6 +777,15 @@ local function contents(e)
   return table.concat(out)
 end
 
+-- A page's foot: turn back on the left, on on the right, each to the page
+-- it names; a way with no page is left out.
+local function foot(r, e)
+  local back, on = turnTo(r, e, -1), turnTo(r, e, 1)
+  return (back and doc.button("&lsaquo; p. " .. back, "turn", back) or "")
+    .. '<span class="gap"></span>'
+    .. (on and doc.button("p. " .. on .. " &rsaquo;", "turn", on) or "")
+end
+
 -- The widget's whole content, in `font` (the widget's own, see doc.fontStyle).
 function M.html(s, font)
   local r = s.recent
@@ -749,7 +804,13 @@ function M.html(s, font)
   else
     v.label = label(e)
     v.body = e.kind == "contents" and contents(e) or doc.lines(e.lines)
-    if e.kind == "page" then v.tools = doc.button("Contents", "contents") end
+    if e.kind == "page" then
+      v.tools = doc.button("Contents", "contents")
+      v.foot = foot(r, e)
+    end
+  end
+  if s.refusal ~= nil then
+    v.body = '<div class="note r-Refusal">' .. doc.escape(s.refusal) .. "</div>" .. v.body
   end
   return doc.frame(v)
 end
@@ -1099,6 +1160,8 @@ html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25
   html,body{height:100%}
   .rd{display:flex;flex-direction:column;height:100%}
   .bar{display:flex;align-items:center;gap:4px;padding:2px 2px 4px;border-bottom:1px solid #30363d;flex-shrink:0}
+  .foot{border-bottom:none;border-top:1px solid #30363d;padding:4px 2px 2px}
+  .gap{flex:1}
   .btn{cursor:pointer;user-select:none;padding:0 6px;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:.92em;line-height:1.5}
   .btn:hover{background:#21262d}
   .btn.on{background:#1f6feb33;border-color:#1f6feb}
@@ -1117,6 +1180,7 @@ html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25
   .sub{color:#6e7681;white-space:nowrap}
   .none,.note{color:#6e7681;font-style:italic}
   .note{margin-top:8px;font-size:.92em}
+  .note.r-Refusal{margin:0 0 6px;font-style:normal}
   /* TextDungeonC's Truecolor Theme (server theme.rs) */
   .r-Item{color:#5fd7d7}.r-Character{color:#e0c060}.r-Place{color:#7fc97f}.r-Exit{color:#6fa8dc}
   .r-Speech{color:#eeeeee}.r-Command{color:#ffd787}.r-Act{color:#d787af}.r-Refusal{color:#c08cd0}
@@ -1378,13 +1442,16 @@ local function attach()
   stopTick()
 end
 
--- Clicks inside a reader (`data-mud-action`): navigate Recent, or send the
--- command the click asks for. Focus goes back to the command line either way.
+-- Clicks inside a reader (`data-mud-action`): navigate Recent, or send what
+-- the click asks for - a command typed for the player, or a side-band
+-- request `{gmcp, data}` (Page.Read), which prints nothing. Focus goes back
+-- to the command line either way.
 local function onReaderAction(w, lib, render)
   registerWidgetEvent(hud[w].id, "action", function(d)
     local cmd = lib.act(hud[w].s, d.action, d.data)
     render()
-    if cmd ~= nil then send(cmd) end
+    if type(cmd) == "table" then sendGMCP(cmd.gmcp, cmd.data)
+    elseif cmd ~= nil then send(cmd) end
     focusPrompt()
   end)
 end
@@ -1432,6 +1499,11 @@ function init()
   onGMCPUpdate("Writing.Read", function(pkg)
     ensureTick()
     pages.read(hud.page.s, pkg)
+    renderPage()
+  end)
+  onGMCPUpdate("Page.Refused", function(pkg)
+    ensureTick()
+    pages.refused(hud.page.s, pkg)
     renderPage()
   end)
   onGMCPUpdate("Quest.Show", function(pkg)
