@@ -10,6 +10,10 @@ local M = {}
 
 M.POOL = 10                -- rows in the markup; beyond that only "+N more"
 M.URGENT_MS = 5000         -- time and hairline turn red under this
+-- A remaining past this is no deadline: the server ships a fight-bound
+-- effect's end as u64::MAX (THIS_FIGHT_MS), which reaches Lua as 2^64.
+-- `status` prints those "(this fight)"; so does the row.
+M.FIGHT_MS = 2^53
 
 function M.new()
   return { state = "unfed", by_name = {}, frozen_at = nil }
@@ -98,10 +102,11 @@ function M.keys(s, now)
     local e = list[i]
     if e ~= nil then
       local left = countdown.remaining(e.cd, now)
+      local fight = left >= M.FIGHT_MS
       k[p .. "n"] = e.name
-      k[p .. "t"] = countdown.mmss(countdown.seconds(e.cd, now))
+      k[p .. "t"] = fight and "this fight" or countdown.mmss(countdown.seconds(e.cd, now))
       k[p .. "u"] = (left < M.URGENT_MS) and 1 or 0
-      k[p .. "p"] = countdown.pct(e.cd, now) .. "%"
+      k[p .. "p"] = fight and "100%" or (countdown.pct(e.cd, now) .. "%")
       k[p .. "d"] = ""
     else
       k[p .. "n"] = ""

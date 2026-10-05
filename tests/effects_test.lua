@@ -117,6 +117,21 @@ eq(k.e1n, "Alpha", "tie 1")
 eq(k.e2n, "Mid", "tie 2")
 eq(k.e3n, "Zeta", "tie 3")
 
+-- A fight-bound effect (the Feed's ends_at_ms is u64::MAX, which reaches Lua
+-- as 2^64) reads "this fight", full and calm, after every timed effect
+effects.effects(s, { effects = {
+  { name = "feinted", ends_at_ms = 2^64 },
+  { name = "Haste", ends_at_ms = 703000 },
+}, now_ms = 700000 }, 250000)
+k = effects.keys(s, 250000)
+eq(k.e1n, "Haste", "timed effect first")
+eq(k.e2n, "feinted", "fight-bound after")
+eq(k.e2t, "this fight", "fight-bound reads this fight")
+eq(k.e2p, "100%", "fight-bound hairline full")
+eq(k.e2u, 0, "fight-bound never urgent")
+eq(effects.tick(s, 9e9), true, "Haste clears")
+eq(s.by_name.feinted ~= nil, true, "fight-bound never Clears locally")
+
 -- Severed: rows kept, Countdowns frozen where they stood, tick is a no-op
 effects.effects(s, pkg(800000, { Haste = 30000 }), 300000)
 effects.sever(s, 310000)
