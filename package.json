@@ -1,6 +1,6 @@
 {
   "name": "textdungeon-hud",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "MudForge plugin: TextDungeonC's HUD (Status, Effects, Slots, Page, Quest), fed by the GMCP Feed",
   "scripts": {
