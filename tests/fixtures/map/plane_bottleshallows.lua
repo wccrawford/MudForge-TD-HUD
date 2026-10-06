@@ -1,0 +1,337 @@
+-- Captured from arrs:4000 (world prism) on 2026-10-06 by tools/mapcap.lua, wayfinder #19.
+-- Area.Map. Authored Area whose holds lists enemies and gather.
+return {
+  area = "the Bottle Shallows",
+  holds = {
+    enemies = {
+      "a bottle crab",
+      "a gold pike",
+      "a honey eel",
+    },
+    gather = {
+      "a reed clump",
+      "pooled light",
+    },
+  },
+  region = "the Saffron Fall",
+  rooms = {
+    ["480"] = {
+      exits = {
+        north = "490",
+        northwest = "483",
+        south = "481",
+        west = "485",
+      },
+      terrain = "water",
+      x = 11,
+      y = 2,
+      z = 0,
+    },
+    ["481"] = {
+      exits = {
+        north = "480",
+        northwest = "485",
+        west = "487",
+      },
+      terrain = "water",
+      x = 11,
+      y = 1,
+      z = 0,
+    },
+    ["482"] = {
+      exits = {
+        east = "483",
+        south = "484",
+        southeast = "485",
+        west = "488",
+      },
+      terrain = "water",
+      x = 9,
+      y = 3,
+      z = 0,
+    },
+    ["483"] = {
+      exits = {
+        east = "490",
+        south = "485",
+        southeast = "480",
+        west = "482",
+      },
+      terrain = "water",
+      x = 10,
+      y = 3,
+      z = 0,
+    },
+    ["484"] = {
+      exits = {
+        east = "485",
+        north = "482",
+        northwest = "488",
+        south = "486",
+        southeast = "487",
+        west = "491",
+      },
+      terrain = "water",
+      x = 9,
+      y = 2,
+      z = 0,
+    },
+    ["485"] = {
+      exits = {
+        east = "480",
+        north = "483",
+        northwest = "482",
+        south = "487",
+        southeast = "481",
+        west = "484",
+      },
+      terrain = "water",
+      x = 10,
+      y = 2,
+      z = 0,
+    },
+    ["486"] = {
+      exits = {
+        east = "487",
+        north = "484",
+        northwest = "491",
+        west = "489",
+      },
+      terrain = "water",
+      x = 9,
+      y = 1,
+      z = 0,
+    },
+    ["487"] = {
+      exits = {
+        east = "481",
+        north = "485",
+        northwest = "484",
+        west = "486",
+      },
+      terrain = "water",
+      x = 10,
+      y = 1,
+      z = 0,
+    },
+    ["488"] = {
+      exits = {
+        east = "482",
+        south = "491",
+        southeast = "484",
+      },
+      leaves = {
+        "down",
+      },
+      terrain = "water",
+      x = 8,
+      y = 3,
+      z = 0,
+    },
+    ["489"] = {
+      exits = {
+        east = "486",
+        north = "491",
+        west = "503",
+      },
+      terrain = "water",
+      x = 8,
+      y = 1,
+      z = 0,
+    },
+    ["490"] = {
+      exits = {
+        south = "480",
+        west = "483",
+      },
+      terrain = "water",
+      x = 11,
+      y = 3,
+      z = 0,
+    },
+    ["491"] = {
+      exits = {
+        east = "484",
+        north = "488",
+        south = "489",
+        southeast = "486",
+      },
+      terrain = "water",
+      x = 8,
+      y = 2,
+      z = 0,
+    },
+    ["492"] = {
+      exits = {
+        east = "493",
+        southwest = "502",
+      },
+      terrain = "water",
+      x = 5,
+      y = 2,
+      z = 0,
+    },
+    ["493"] = {
+      exits = {
+        south = "494",
+        southeast = "503",
+        west = "492",
+      },
+      terrain = "water",
+      x = 6,
+      y = 2,
+      z = 0,
+    },
+    ["494"] = {
+      exits = {
+        north = "493",
+        south = "495",
+        southwest = "498",
+        west = "497",
+      },
+      terrain = "water",
+      x = 6,
+      y = 1,
+      z = 0,
+    },
+    ["495"] = {
+      exits = {
+        north = "494",
+        northeast = "503",
+        west = "498",
+      },
+      terrain = "water",
+      x = 6,
+      y = 0,
+      z = 0,
+    },
+    ["496"] = {
+      exits = {
+        east = "498",
+        northeast = "497",
+      },
+      terrain = "water",
+      x = 4,
+      y = 0,
+      z = 0,
+    },
+    ["497"] = {
+      exits = {
+        east = "494",
+        southwest = "496",
+        west = "502",
+      },
+      terrain = "water",
+      x = 5,
+      y = 1,
+      z = 0,
+    },
+    ["498"] = {
+      exits = {
+        east = "495",
+        northeast = "494",
+        south = "499",
+        west = "496",
+      },
+      terrain = "water",
+      x = 5,
+      y = 0,
+      z = 0,
+    },
+    ["499"] = {
+      exits = {
+        north = "498",
+      },
+      terrain = "water",
+      x = 5,
+      y = -1,
+      z = 0,
+    },
+    ["500"] = {
+      exits = {
+        south = "502",
+        southwest = "501",
+      },
+      terrain = "water",
+      x = 4,
+      y = 2,
+      z = 0,
+    },
+    ["501"] = {
+      exits = {
+        east = "502",
+        northeast = "500",
+        west = "506",
+      },
+      terrain = "water",
+      x = 3,
+      y = 1,
+      z = 0,
+    },
+    ["502"] = {
+      exits = {
+        east = "497",
+        north = "500",
+        northeast = "492",
+        west = "501",
+      },
+      terrain = "water",
+      x = 4,
+      y = 1,
+      z = 0,
+    },
+    ["503"] = {
+      exits = {
+        east = "489",
+        northwest = "493",
+        southwest = "495",
+      },
+      terrain = "water",
+      x = 7,
+      y = 1,
+      z = 0,
+    },
+    ["504"] = {
+      exits = {
+        east = "507",
+      },
+      leaves = {
+        "west",
+      },
+      terrain = "water",
+      x = 0,
+      y = 0,
+      z = 0,
+    },
+    ["505"] = {
+      exits = {
+        south = "506",
+      },
+      terrain = "water",
+      x = 2,
+      y = 2,
+      z = 0,
+    },
+    ["506"] = {
+      exits = {
+        east = "501",
+        north = "505",
+        southwest = "507",
+      },
+      terrain = "water",
+      x = 2,
+      y = 1,
+      z = 0,
+    },
+    ["507"] = {
+      exits = {
+        northeast = "506",
+        west = "504",
+      },
+      terrain = "water",
+      x = 1,
+      y = 0,
+      z = 0,
+    },
+  },
+}
