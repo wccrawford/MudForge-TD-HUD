@@ -1,5 +1,5 @@
 -- Captured from arrs:4000 (world prism) on 2026-10-06 by tools/mapcap.lua, wayfinder #19.
--- Area.Map. Expedition member 1 after the windlass opened the vault door from the next room: closed = false.
+-- Area.Map. Expedition member 1 at the vault door: 12 rooms, the door in leaves is closed.
 return {
   area = "the Spit Cut",
   holds = {},
@@ -40,7 +40,7 @@ return {
     d12 = {
       doors = {
         north = {
-          closed = false,
+          closed = true,
           name = "vault door",
         },
       },
