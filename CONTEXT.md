@@ -67,3 +67,25 @@ _Avoid_: flip, next/previous (Recent's arrows, which move through what was alrea
 **Windows bar**:
 The widget with one button per HUD window that opens it. It only opens, never hides: MudForge tells a plugin nothing when a window is closed from its own chrome, so a toggle could not know which way to go. The bar itself is shown on every start, because MudForge cannot yet bring back a custom window the player closed.
 _Avoid_: toolbar, menu
+
+### Map window
+
+**Plane**:
+Everything one `Area.Map` carries: the cells and edges of every level of the Area the player stands in. The next `Area.Map` replaces it whole, and nothing is merged or remembered. A Delve growing, a door opening, a Depth descending and an Expedition crossing are each just a new Plane.
+_Avoid_: map (the verb, the window, and the server's term), zone
+
+**Held position**:
+The newest `Area.Where` whose `here` is not on the Plane yet, kept until a Plane that holds it arrives. Only one is held. It never moves a marker: markers move only to a room that is on the Plane.
+_Avoid_: pending, queued
+
+**Level shown**:
+The one level of the Plane being drawn. It is the player's level, except while Browsing. With no player position on the Plane yet, it is level 0, or the lowest level if there is no level 0.
+_Avoid_: floor, layer, z (the field, not the view)
+
+**Browsing**:
+Showing a level other than the player's. It ends when the player moves (`here` changes), when a Plane for another Area arrives, or when the browsed level is gone. A member moving, or a re-sent Plane for the same Area, leaves it alone.
+_Avoid_: scrolling, peeking
+
+**No-plane reason**:
+The single line a Live Map window shows instead of a drawing: no `Area.Map` this connection (not told apart from `config map off`), an Area with no cells (`rooms: {}`), or the player off the Plane (`Area.Where` without `here`). Unfed and Severed windows never show one.
+_Avoid_: error, empty state, blank
