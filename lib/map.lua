@@ -425,7 +425,10 @@ local function svg(s, sc)
     end
   end
 
-  -- doors: across the line at the cell boundary; closed a bar, open two posts
+  -- doors: across the line at the cell boundary; closed a bar, open two
+  -- posts. Drawn over the you ring, which would otherwise hide half a door
+  -- on the player's own tile.
+  local doors = {}
   local function door(a, word, b, d)
     local v = DIRS[word] or { sign(b.x - a.x), sign(b.y - a.y) }
     local mx, my = px(a) + v[1] * U / 2, py(a) - v[2] * U / 2
@@ -434,11 +437,11 @@ local function svg(s, sc)
     local L = 4.8
     local title = "<title>" .. doc.escape(d.name) .. (d.closed and " (closed)" or " (open)") .. "</title>"
     if d.closed then
-      add('<g class="door">' .. title .. line(mx - nx * L, my - ny * L, mx + nx * L, my + ny * L, 'stroke="' .. DOOR .. '" stroke-width="3"') .. "</g>")
+      doors[#doors + 1] = '<g class="door">' .. title .. line(mx - nx * L, my - ny * L, mx + nx * L, my + ny * L, 'stroke="' .. DOOR .. '" stroke-width="3"') .. "</g>"
     else
-      add('<g class="door" stroke="' .. DOOR .. '" stroke-width="2.2">' .. title
+      doors[#doors + 1] = '<g class="door" stroke="' .. DOOR .. '" stroke-width="2.2">' .. title
         .. line(mx - nx * L, my - ny * L, mx - nx * 2.2, my - ny * 2.2, "")
-        .. line(mx + nx * 2.2, my + ny * 2.2, mx + nx * L, my + ny * L, "") .. "</g>")
+        .. line(mx + nx * 2.2, my + ny * 2.2, mx + nx * L, my + ny * L, "") .. "</g>"
     end
   end
   for _, e in ipairs(sc.edges) do
@@ -471,6 +474,7 @@ local function svg(s, sc)
       .. '" width="' .. n(T + 5.2) .. '" height="' .. n(T + 5.2) .. '" rx="3.5" fill="none" stroke="' .. YOU .. '" stroke-width="2.4"/>'
       .. '<circle cx="' .. n(px(you)) .. '" cy="' .. n(py(you)) .. '" r="2.8" fill="' .. YOU .. '" stroke="' .. DARK .. '" stroke-width="1.2"/></g>')
   end
+  for _, d in ipairs(doors) do add(d) end
   for _, m in ipairs(marks) do add(m) end   -- over the you ring, so it never hides a mark
 
   return '<svg class="plane" viewBox="' .. n(x0 * U - PAD) .. " " .. n(-y1 * U - PAD) .. " " .. n(w) .. " " .. n(h)

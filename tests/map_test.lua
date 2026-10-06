@@ -262,6 +262,7 @@ has(h, 'marker-end="url(#aA)"', "a leave stub has an arrowhead")
 
 -- You: the yellow ring and dot
 has(h, '<g class="you"><title>You</title><rect x="51.4" y="-188.6"', "you ring around d12")
+assert(h:find('<g class="door">', 1, true) > h:find('<g class="you">', 1, true), "a door is drawn over the you ring")
 
 -- The door opened: two posts
 s = map.new()
