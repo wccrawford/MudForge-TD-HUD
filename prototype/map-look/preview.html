@@ -1,0 +1,127 @@
+<!doctype html>
+<!-- PROTOTYPE — throwaway. Three looks for the Map window (A Tiles, B Nodes and lines,
+     C Floor plan), switchable via ?variant=, on the 11 captured planes. Wayfinder
+     ticket "What the Map looks like" (map #17). Open this file in a browser. -->
+<html><head><meta charset="utf-8"><title>Map window look — prototype</title>
+<style>
+  body{margin:0;background:#010409;color:#c9d1d9;font:13px/1.35 "Segoe UI",system-ui,sans-serif;display:flex;gap:16px;padding:16px 16px 70px}
+  #ctl{width:250px;flex:none;display:flex;flex-direction:column;gap:9px}
+  #ctl label{display:block}
+  #ctl fieldset{border:1px solid #30363d;border-radius:4px;padding:4px 8px}
+  #ctl legend{color:#8b949e}
+  select,button{background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:3px;padding:2px 6px;font:inherit}
+  .note{color:#8b949e;font-size:12px}
+  #stage{display:flex;flex-direction:column;gap:10px;min-width:0;flex:1}
+  .win{background:#0d1117;border:1px solid #30363d;border-radius:6px;overflow:hidden;display:flex;flex-direction:column;resize:both;width:440px;height:420px;min-width:120px;min-height:100px}
+  .win .tb{background:#161b22;color:#8b949e;font-size:12px;padding:3px 8px;border-bottom:1px solid #30363d;flex:none}
+  .win .wc{flex:1;min-height:0;padding:6px;overflow:hidden}
+  #gallery{display:none;flex-wrap:wrap;gap:10px}
+  #gallery .win{width:300px;height:290px}
+  #dump{white-space:pre-wrap;font:11px/1.3 Consolas,monospace;color:#8b949e;max-height:260px;overflow:auto;background:#0d1117;border:1px solid #30363d;padding:6px;border-radius:4px}
+  #bar{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:#ffd33d;color:#000;border-radius:999px;padding:6px 10px;display:flex;gap:10px;align-items:center;box-shadow:0 4px 18px #000a;font-weight:600;z-index:9}
+  #bar button{background:#000;color:#ffd33d;border:0;border-radius:999px;width:28px;height:28px;cursor:pointer}
+  [data-id]{cursor:pointer}
+</style></head>
+<body>
+<div id="ctl">
+  <label>Plane <select id="plane"></select></label>
+  <div class="note" id="pnote"></div>
+  <div class="note">Click a room to stand there. Shift+click puts <b>Rei</b> there (shift+click Rei's room again to drop Rei).</div>
+  <label>Level <button id="lvdown">▼</button><button id="lvup">▲</button><button id="lvme">mine</button> <span id="lvtxt" class="note"></span></label>
+  <fieldset><legend>Window state</legend>
+    <label><input type="radio" name="hud" value="live" checked> Live</label>
+    <label><input type="radio" name="hud" value="unfed"> Unfed</label>
+    <label><input type="radio" name="hud" value="severed"> Severed</label></fieldset>
+  <fieldset><legend>No-plane reason (Live only)</legend>
+    <label><input type="radio" name="why" value="" checked> none, draw</label>
+    <label><input type="radio" name="why" value="nomap"> no <code>Area.Map</code> yet</label>
+    <label><input type="radio" name="why" value="nocells"> <code>rooms: {}</code></label>
+    <label><input type="radio" name="why" value="offplane"> no <code>here</code></label></fieldset>
+  <label><input type="checkbox" id="fakeback"> fake a <code>back</code> on your room (never captured)</label>
+  <label><input type="checkbox" id="fakeholds"> fake <code>holds</code> (only Bottle Shallows has them)</label>
+  <label>Font <input type="range" id="font" min="10" max="18" value="13"> <span id="fonttxt"></span></label>
+  <label><input type="checkbox" id="gal"> gallery: every plane</label>
+  <div id="dump"></div>
+</div>
+<div id="stage">
+  <div class="win" id="main"><div class="tb">Map</div><div class="wc" id="mainc"></div></div>
+  <div id="gallery"></div>
+</div>
+<div id="bar"><button id="prev">←</button><span id="vlabel"></span><button id="next">→</button></div>
+<script src="fixtures.js"></script>
+<script src="render.js"></script>
+<script>
+  var st = document.createElement('style'); st.textContent = MapLook.CSS; document.head.appendChild(st);
+  var VARS = ['A', 'D', 'B', 'C'], q = new URLSearchParams(location.search);
+  var S = { variant: VARS.indexOf(q.get('variant')) >= 0 ? q.get('variant') : 'A', plane: q.get('plane') || 'gildhythe', here: null, rei: null, level: null };
+  var $ = function (id) { return document.getElementById(id); };
+
+  Object.keys(PLANES).forEach(function (n) { var o = document.createElement('option'); o.value = n; o.textContent = PLANES[n].map.area + ' (' + n + ')'; $('plane').appendChild(o); });
+
+  function defaultHere(n) {
+    var rooms = PLANES[n].map.rooms;
+    for (var i = 0; i < WHERES.length; i++) if (rooms[WHERES[i].where.here]) return WHERES[i].where.here;
+    return Object.keys(rooms)[0];
+  }
+  function pickPlane(n) { S.plane = n; S.here = defaultHere(n); S.rei = n === 'gildhythe' ? '249' : null; S.level = null; draw(); }
+
+  function viewFor(n, here, rei, level) {
+    var map = JSON.parse(JSON.stringify(PLANES[n].map));
+    if ($('fakeback').checked && map.rooms[here]) map.rooms[here].back = 'west';
+    if ($('fakeholds').checked && !(map.holds.enemies || map.holds.gather)) map.holds = { enemies: ['a sour wasp', 'a fen lurcher'], gather: ['bitterwort'] };
+    var why = document.querySelector('[name=why]:checked').value;
+    if (why === 'nocells') map.rooms = {};
+    var members = {}; if (rei && map.rooms[rei]) members.Rei = rei;
+    return {
+      hud: document.querySelector('[name=hud]:checked').value, map: why === 'nomap' ? null : map,
+      where: why === 'offplane' ? { members: members } : { here: here, members: members },
+      level: level, reason: why || null,
+    };
+  }
+
+  function draw() {
+    $('plane').value = S.plane; $('pnote').textContent = PLANES[S.plane].note;
+    document.body.style.fontSize = ''; $('fonttxt').textContent = $('font').value + 'px';
+    var v = viewFor(S.plane, S.here, S.rei, S.level);
+    var html = MapLook.render(S.variant, v);
+    $('mainc').innerHTML = html; $('mainc').style.fontSize = $('font').value + 'px';
+    var zs = v.map && Object.keys(v.map.rooms).length ? MapLook.levels(v.map) : [];
+    $('lvtxt').textContent = zs.length ? 'z ' + MapLook.shownLevel(v) + ' of [' + zs.join(', ') + ']' + (S.level != null ? ' (Browsing)' : '') : '';
+    $('vlabel').textContent = S.variant + ' — ' + MapLook.NAMES[S.variant];
+    $('dump').textContent = 'here ' + S.here + (S.rei ? '  Rei ' + S.rei : '') + '  svg ' + (html.length / 1024).toFixed(1) + ' KB\n\n' +
+      (v.map && v.map.rooms[S.here] ? 'Area.Map.rooms["' + S.here + '"] = ' + JSON.stringify(v.map.rooms[S.here], null, 1) : '');
+    var u = new URL(location); u.searchParams.set('variant', S.variant); u.searchParams.set('plane', S.plane); history.replaceState(null, '', u);
+    var gal = $('gal').checked; $('gallery').style.display = gal ? 'flex' : 'none';
+    if (gal) $('gallery').innerHTML = Object.keys(PLANES).map(function (n) {
+      return '<div class="win"><div class="tb">' + n + '</div><div class="wc" style="font-size:' + $('font').value + 'px">' + MapLook.render(S.variant, viewFor(n, defaultHere(n), n === 'gildhythe' ? '249' : null, null)) + '</div></div>';
+    }).join('');
+  }
+
+  $('mainc').addEventListener('click', function (e) {
+    var g = e.target.closest('[data-id]'); if (!g) return;
+    var id = g.getAttribute('data-id');
+    if (e.shiftKey) S.rei = S.rei === id ? null : id;
+    else { if (id !== S.here) S.level = null; S.here = id; } // moving ends Browsing
+    draw();
+  });
+  function stepLevel(d) {
+    var v = viewFor(S.plane, S.here, S.rei, S.level); if (!v.map) return;
+    var zs = MapLook.levels(v.map), i = zs.indexOf(MapLook.shownLevel(v)) + d;
+    if (i < 0 || i >= zs.length) return;
+    var mine = v.map.rooms[S.here] && v.map.rooms[S.here].z;
+    S.level = zs[i] === mine ? null : zs[i]; draw();
+  }
+  $('lvup').onclick = function () { stepLevel(1); };
+  $('lvdown').onclick = function () { stepLevel(-1); };
+  $('lvme').onclick = function () { S.level = null; draw(); };
+  $('plane').onchange = function () { pickPlane(this.value); };
+  document.querySelectorAll('input').forEach(function (i) { i.addEventListener('input', draw); });
+  function cycle(d) { S.variant = VARS[(VARS.indexOf(S.variant) + d + VARS.length) % VARS.length]; draw(); }
+  $('prev').onclick = function () { cycle(-1); }; $('next').onclick = function () { cycle(1); };
+  addEventListener('keydown', function (e) {
+    if (e.target.matches('input,textarea,select,[contenteditable]')) return;
+    if (e.key === 'ArrowLeft') cycle(-1); if (e.key === 'ArrowRight') cycle(1);
+  });
+  pickPlane(S.plane);
+</script>
+</body></html>
