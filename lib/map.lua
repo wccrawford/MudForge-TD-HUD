@@ -61,6 +61,12 @@ local function group(rooms, members)
   return out
 end
 
+-- MudForge's sandbox has no `next`, so emptiness is asked of pairs.
+local function empty(t)
+  for _ in pairs(t) do return false end
+  return true
+end
+
 local function levels(rooms)
   local seen, zs = {}, {}
   for _, r in pairs(rooms or {}) do
@@ -68,6 +74,13 @@ local function levels(rooms)
   end
   table.sort(zs)
   return zs, seen
+end
+
+local function hasLevel(rooms, z)
+  for _, r in pairs(rooms) do
+    if r.z == z then return true end
+  end
+  return false
 end
 
 -- The level shown when not Browsing: the player's, else 0, else the lowest.
@@ -111,7 +124,7 @@ function M.map(s, pkg)
     for id in pairs(s.members) do
       if rooms[id] == nil then s.members[id] = nil end
     end
-    if s.browse ~= nil and not select(2, levels(rooms))[s.browse] then s.browse = nil end
+    if s.browse ~= nil and not hasLevel(rooms, s.browse) then s.browse = nil end
   else
     s.here = nil
     s.members = {}
@@ -152,7 +165,7 @@ end
 
 -- The Level shown, or nil with no Plane to show.
 function M.shown(s)
-  if s.rooms == nil or next(s.rooms) == nil then return nil end
+  if s.rooms == nil or empty(s.rooms) then return nil end
   if s.browse ~= nil then return s.browse end
   return baseLevel(s)
 end
@@ -161,8 +174,9 @@ function M.browsing(s)
   return s.browse ~= nil
 end
 
--- A click in the widget. `level` with a `z` shows that level, or with
--- `mine` the player's; asking for the level shown by default is not
+-- A click in the widget. `level` with `z<n>` shows level z = n, or with
+-- `mine` the player's. The z rides with a letter because MudForge drops a
+-- click's data when it reads as a falsy number, which "0" would; asking for the level shown by default is not
 -- Browsing. Nothing is ever sent to the server.
 function M.act(s, action, data)
   if action ~= "level" or s.rooms == nil then return nil end
@@ -170,8 +184,8 @@ function M.act(s, action, data)
     s.browse = nil
     return nil
   end
-  local z = tonumber(data)
-  if z == nil or not select(2, levels(s.rooms))[z] then return nil end
+  local z = tonumber(type(data) == "string" and data:match("^z(%-?%d+)$") or nil)
+  if z == nil or not hasLevel(s.rooms, z) then return nil end
   if z == baseLevel(s) then s.browse = nil else s.browse = z end
   return nil
 end
@@ -494,14 +508,14 @@ local function levelBar(s, z)
     if r.z ~= z then
       for _, name in ipairs(s.members[id]) do
         table.insert(who[r.z > z and "up" or "down"], '<span class="lvmem" title="' .. doc.escape(name .. ": level " .. nth(r.z)) .. '"'
-          .. act(n(r.z)) .. ">" .. doc.escape(initial(name)) .. "</span>")
+          .. act("z" .. n(r.z)) .. ">" .. doc.escape(initial(name)) .. "</span>")
       end
     end
   end
-  return '<div class="mlevel"><span class="lvend">' .. arrow("&#9660;", "Level below", zs[at - 1] and n(zs[at - 1]))
+  return '<div class="mlevel"><span class="lvend">' .. arrow("&#9660;", "Level below", zs[at - 1] and ("z" .. n(zs[at - 1])))
     .. table.concat(who.down) .. "</span>"
     .. '<span class="lvmid' .. (s.browse ~= nil and " browsing" or "") .. '">Level ' .. at .. " of " .. #zs .. "</span>"
-    .. '<span class="lvend lvr">' .. table.concat(who.up) .. arrow("&#9650;", "Level above", zs[at + 1] and n(zs[at + 1])) .. "</span></div>"
+    .. '<span class="lvend lvr">' .. table.concat(who.up) .. arrow("&#9650;", "Level above", zs[at + 1] and ("z" .. n(zs[at + 1]))) .. "</span></div>"
 end
 
 local function holds(s)
@@ -532,7 +546,7 @@ function M.html(s, font)
       or '<div class="mnone">Map</div>'
   elseif s.off then
     body = live and reason("You are not on the map of " .. doc.escape(s.area) .. ".") or '<div class="mnone">Map</div>'
-  elseif next(s.rooms) == nil then
+  elseif empty(s.rooms) then
     body = head(s) .. (live and reason(doc.escape(s.area) .. " has no map.") or "")
   else
     local sc = scene(s)

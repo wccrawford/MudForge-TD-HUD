@@ -1,5 +1,5 @@
 -- TextDungeon HUD: Status / Effects / Slots widgets, the Page and Quest
--- readers and the Windows bar for MudForge, fed only by TextDungeonC's GMCP
+-- readers, the Map window and the Windows bar for MudForge, fed only by TextDungeonC's GMCP
 -- Feed. This is the source; the file MudForge imports is
 -- the built textdungeon-hud.lua at the repo root (ADR 0001).
 plugin = {
@@ -7,7 +7,7 @@ plugin = {
   name = "textdungeon-hud",
   version = "0.3.1",
   author = "wccrawford",
-  description = "TextDungeon's Status, Effects, Slots, Page and Quest as MudForge widgets, fed by the GMCP Feed.",
+  description = "TextDungeon's Status, Effects, Slots, Page, Quest and Map as MudForge widgets, fed by the GMCP Feed.",
   settings = { saveState = true },
 }
 
@@ -17,13 +17,14 @@ local slots = require("slots")
 local pages = require("pages")
 local quests = require("quests")
 local bar = require("bar")
+local map = require("map")
 local doc = require("doc")
 local widgets = require("widgets")   -- { status = html, ..., reader = css, bar = css }, built from src/widgets/
 
 -- Top-anchored columns from the right edge (wayfinder #14): the state column
 -- (Status / Effects / Slots) against the edge, the reader column (the
--- Windows bar, Quest, Page) to its left, 12 px from the edge and between
--- widgets. Heights include MudForge's title bar.
+-- Windows bar, Quest, Page) to its left, the Map to its left (map #17),
+-- 12 px from the edge and between widgets. Heights include MudForge's title bar.
 local GAP = 12
 local COLUMNS = {
   { width = 240, bound = true, widgets = {
@@ -36,12 +37,15 @@ local COLUMNS = {
     { name = "quest", title = "Quest", height = 300 },
     { name = "page", title = "Page", height = 360 },
   } },
+  { width = 340, widgets = {
+    { name = "map", title = "Map", height = 380 },
+  } },
 }
 -- What the Windows bar opens, in bar order; never the bar itself.
 local WINDOWS = {
   { name = "status", title = "Status" }, { name = "effects", title = "Effects" },
   { name = "slots", title = "Slots" }, { name = "quest", title = "Quest" },
-  { name = "page", title = "Page" },
+  { name = "page", title = "Page" }, { name = "map", title = "Map" },
 }
 
 local TICK_MS = 100       -- the shared Countdown tick
@@ -54,6 +58,7 @@ local hud = {
   page = { id = nil, s = pages.new() },
   quest = { id = nil, s = quests.new() },
   bar = { id = nil, s = bar.new(WINDOWS) },
+  map = { id = nil, s = map.new() },
 }
 local tick = nil
 local repushDue = false   -- one re-push owed after init set the content
@@ -123,6 +128,12 @@ local function renderBar()
   setWidgetProperty(hud.bar.id, "content", widgets.bar .. bar.html(hud.bar.s, fontOf("bar")))
 end
 
+-- The Map is rewritten whole too, on every Plane, step, Group move and
+-- level click (wayfinder #21).
+local function renderMap()
+  setWidgetProperty(hud.map.id, "content", widgets.map .. map.html(hud.map.s, fontOf("map")))
+end
+
 -- How each widget follows a new font. An html widget gets no event when the
 -- player picks one (the resize event the docs promise is a canvas widget's),
 -- so the tick asks every FONT_TICKS; only a font that differs from the one
@@ -135,6 +146,7 @@ local REFONT = {
   page = function() renderPage() end,
   quest = function() renderQuest() end,
   bar = function() renderBar() end,
+  map = function() renderMap() end,
 }
 local lastFont = {}         -- name -> the font css last applied
 local fontTicks = 0
@@ -207,6 +219,12 @@ end
 -- Every feed push proves the session is up, so all timers start from the
 -- feed handlers: the tick until it takes, and the one re-push owed after init.
 local function ensureTick()
+  -- every feed push also makes an Unfed Map Live, so it can say why it has
+  -- no Plane when no Area.Map comes
+  if hud.map.s.state == "unfed" then
+    map.live(hud.map.s)
+    renderMap()
+  end
   if tick ~= nil and tick ~= "" then return end
   tick = addTimer(TICK_MS, onTick, true)
   if tick ~= "" and repushDue then
@@ -223,9 +241,11 @@ local function attach()
   hud.slots.s = slots.new()
   hud.page.s = pages.new()
   hud.quest.s = quests.new()
+  hud.map.s = map.new()
   pushAll()
   renderPage()
   renderQuest()
+  renderMap()
   stopTick()
 end
 
@@ -239,6 +259,16 @@ local function onReaderAction(w, lib, render)
     render()
     if type(cmd) == "table" then sendGMCP(cmd.gmcp, cmd.data)
     elseif cmd ~= nil then send(cmd) end
+    focusPrompt()
+  end)
+end
+
+-- A level click in the Map: Lua owns Browsing (wayfinder #24); nothing is
+-- sent to the server.
+local function onMapAction()
+  registerWidgetEvent(hud.map.id, "action", function(d)
+    map.act(hud.map.s, d.action, d.data)
+    renderMap()
     focusPrompt()
   end)
 end
@@ -259,6 +289,7 @@ function init()
   noteFonts()
   onReaderAction("page", pages, renderPage)
   onReaderAction("quest", quests, renderQuest)
+  onMapAction()
   onBarAction()
 
   onGMCPUpdate("Char.Vitals", function(pkg)
@@ -298,6 +329,16 @@ function init()
     quests.show(hud.quest.s, pkg)
     renderQuest()
   end)
+  onGMCPUpdate("Area.Map", function(pkg)
+    ensureTick()
+    map.map(hud.map.s, pkg)
+    renderMap()
+  end)
+  onGMCPUpdate("Area.Where", function(pkg)
+    ensureTick()
+    map.where(hud.map.s, pkg)
+    renderMap()
+  end)
 
   attach()
   showBar()
@@ -321,8 +362,10 @@ function onDisconnect()
   slots.sever(hud.slots.s)
   pages.sever(hud.page.s)
   quests.sever(hud.quest.s)
+  map.sever(hud.map.s)
   pushAll()
   renderPage()
   renderQuest()
+  renderMap()
   stopTick()
 end
