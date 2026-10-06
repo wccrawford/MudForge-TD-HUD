@@ -22,7 +22,7 @@ html,body{margin:0;height:100%;background:transparent;color:#c9d1d9;font:13px/1.
 #pick button.on{background:#ffd33d;color:#000}
 </style>
 <div id="root"><div id="out"></div>
-<div id="pick">PROTOTYPE <button data-v="A">A Stepper</button><button data-v="B">B Chips</button><button data-v="C">C Ladder</button><button data-v="D">D Stairs</button></div></div>
+<div id="pick">PROTOTYPE <button data-v="E">E Markers</button><button data-v="F">F Counts</button><button data-v="A">A Stepper</button><button data-v="B">B Chips</button><button data-v="C">C Ladder</button><button data-v="D">D Stairs</button></div></div>
 <script>
 // PROTOTYPE — throwaway (wayfinder ticket "What the Map looks like", map #17).
 // Three structurally different looks for the Map window, drawn from one Area.Map
@@ -280,6 +280,7 @@ html,body{margin:0;height:100%;background:transparent;color:#c9d1d9;font:13px/1.
       (lv ? '<div class="A-level">' + lv + '</div>' : '') + '</div>' +
       '<div class="A-body">' + frame(s, U * 0.9, 34) + defs + g + '</svg>' + (view.sideHtml ? view.sideHtml(s) : '') + '</div>' +
       (away ? '<div class="A-away">' + away + '</div>' : '') +
+      (view.footHtml ? view.footHtml(s) : '') +
       (holds.length ? '<div class="A-holds">' + holds.map(function (x) { return '<div><b>' + x.k + '</b> ' + x.v.map(esc).join(', ') + '</div>'; }).join('') + '</div>' : '') +
       '</div>';
   }
@@ -582,7 +583,54 @@ html,body{margin:0;height:100%;background:transparent;color:#c9d1d9;font:13px/1.
     },
   };
 
+  // E/F — the header holds only the names; a bar under the plane holds
+  // ▼ Level n of m ▲, and who is on other levels sits by the arrow that leads to them
+  // (instead of the "Rei: level 2" line). E draws each one as the map's own marker
+  // (coral initial, yellow ring for you); F folds members into a count.
+  function footer(s, side) {
+    if (s.zs.length < 2) return '';
+    var i = s.zs.indexOf(s.z), lo = s.zs[i - 1], hi = s.zs[i + 1];
+    var who = { up: [], down: [] };
+    if (browsing(s)) who[s.youLevel > s.z ? 'up' : 'down'].push({ you: true, z: s.youLevel });
+    s.members.forEach(function (m) { if (!m.here) who[m.r.z > s.z ? 'up' : 'down'].push({ name: m.name, z: m.r.z }); });
+    return '<div class="L-foot">' +
+      '<span class="L-end"><button title="Level below"' + (lo == null ? ' disabled' : act(lo)) + '>▼</button>' + side(s, who.down) + '</span>' +
+      '<span class="L-mid' + (browsing(s) ? ' L-br' : '') + '">Level ' + (i + 1) + ' of ' + s.zs.length + '</span>' +
+      '<span class="L-end L-r">' + side(s, who.up) + '<button title="Level above"' + (hi == null ? ' disabled' : act(hi)) + '>▲</button></span></div>';
+  }
+  function discs(s, list) {
+    return list.map(function (w) {
+      return w.you ? '<i class="L-you" title="You: level ' + n(s, w.z) + ' (back to you)"' + act('mine') + '></i>'
+        : '<i class="L-mem" title="' + esc(w.name) + ': level ' + n(s, w.z) + '"' + act(w.z) + '>' + esc(w.name[0]) + '</i>';
+    }).join('');
+  }
+  function counts(s, list) {
+    var you = list.filter(function (w) { return w.you; }), mem = list.filter(function (w) { return !w.you; });
+    return (you.length ? '<i class="L-you" title="You: level ' + n(s, you[0].z) + ' (back to you)"' + act('mine') + '></i>' : '') +
+      (mem.length ? '<span class="L-cnt" title="' + esc(mem.map(function (w) { return w.name + ': level ' + n(s, w.z); }).join('\n')) + '"><i class="L-dm"></i>' + mem.length + '</span>' : '');
+  }
+  function foot(side) {
+    return function (v) {
+      v.levelHtml = function () { return ''; };
+      v.awayHtml = function () { return ''; };
+      v.footHtml = function (s) { return footer(s, side); };
+      return v;
+    };
+  }
+  V.E = foot(discs);
+  V.F = foot(counts);
+
   var CSS = [
+    '.L-foot{display:flex;align-items:center;border-top:1px solid #30363d;padding-top:3px;font-size:.92em;color:#8b949e}',
+    '.L-end{flex:1;display:flex;align-items:center;gap:3px;min-width:0}.L-r{justify-content:flex-end}',
+    '.L-mid{flex:none;padding:0 .5em;white-space:nowrap}',
+    '.L-foot button{background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:3px;font:inherit;cursor:pointer;line-height:1.2;padding:0 6px}',
+    '.L-foot button:disabled{opacity:.3;cursor:default}.L-foot button:not(:disabled):hover{border-color:#8b949e;color:#fff}',
+    '.L-mem{display:inline-flex;align-items:center;justify-content:center;width:1.25em;height:1.25em;border-radius:50%;background:#ff7b72;color:#0d1117;font-style:normal;font-weight:700;font-size:.82em;cursor:pointer;flex:none}',
+    '.L-you{display:inline-block;width:.95em;height:.95em;border-radius:3px;border:2px solid #ffd33d;cursor:pointer;flex:none;box-sizing:border-box;position:relative}',
+    '.L-you::after{content:"";position:absolute;left:50%;top:50%;width:3px;height:3px;margin:-1.5px;border-radius:50%;background:#ffd33d}',
+    '.L-cnt{display:inline-flex;align-items:center;gap:2px;color:#ff7b72;font-weight:600}',
+    '.L-mem:hover,.L-you:hover{outline:1px solid #fff}',
     '.L-step{display:inline-flex;align-items:center;gap:4px}',
     '.L-step button,.L-chips button,.L-ladder button,.L-back{background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:3px;font:inherit;cursor:pointer;line-height:1.2}',
     '.L-step button{padding:0 5px;font-size:.85em}',
@@ -603,13 +651,13 @@ html,body{margin:0;height:100%;background:transparent;color:#c9d1d9;font:13px/1.
 
   root.LevelCtl = {
     view: function (variant, view) { return (V[variant] || V.A)(view); },
-    CSS: CSS, VARIANTS: ['A', 'B', 'C', 'D'],
-    NAMES: { A: 'Stepper in the header', B: 'Chips in the header', C: 'Ladder at the side', D: 'Click the stairs' },
+    CSS: CSS, VARIANTS: ['E', 'F', 'A', 'B', 'C', 'D'],
+    NAMES: { A: 'Stepper in the header', B: 'Chips in the header', C: 'Ladder at the side', D: 'Click the stairs', E: 'Footer, markers by the arrows', F: 'Footer, counts by the arrows' },
   };
 })(typeof window !== 'undefined' ? window : globalThis);
 
 var css=document.createElement('style');css.textContent=MapLook.CSS+'\n'+LevelCtl.CSS;document.head.appendChild(css);
-var V='A',map=null,where=null,level=null;
+var V='E',map=null,where=null,level=null;
 function reason(){ if(!map) return 'nomap'; if(!Object.keys(map.rooms||{}).length) return 'nocells';
   if(where && !where.here) return 'offplane'; return null; }
 function draw(){
@@ -631,7 +679,7 @@ draw();mudforge.send('ready',{});
 </script>
 ]==]
 
-local id, lastMap, lastWhere, variant, level = nil, nil, nil, "A", nil
+local id, lastMap, lastWhere, variant, level = nil, nil, nil, "E", nil
 
 local function myZ()
   local here = lastWhere and lastWhere.here

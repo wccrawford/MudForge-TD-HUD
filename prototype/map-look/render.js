@@ -254,6 +254,7 @@
       (lv ? '<div class="A-level">' + lv + '</div>' : '') + '</div>' +
       '<div class="A-body">' + frame(s, U * 0.9, 34) + defs + g + '</svg>' + (view.sideHtml ? view.sideHtml(s) : '') + '</div>' +
       (away ? '<div class="A-away">' + away + '</div>' : '') +
+      (view.footHtml ? view.footHtml(s) : '') +
       (holds.length ? '<div class="A-holds">' + holds.map(function (x) { return '<div><b>' + x.k + '</b> ' + x.v.map(esc).join(', ') + '</div>'; }).join('') + '</div>' : '') +
       '</div>';
   }

@@ -24,6 +24,7 @@
   <div class="note" id="pnote"></div>
   <div class="note">Click a room to stand there (moving ends Browsing). Shift+click puts <b>Rei</b> there; shift+click Rei's room again to drop Rei.</div>
   <div class="note">Every level click goes through <code>data-mud-action="level"</code>; the stand-in for Lua below logs it and owns Browsing.</div>
+  <label><input type="checkbox" id="four" checked> a Group of four (Gildhythe: Rei, Ash and Tal upstairs, Moss downstairs)</label>
   <div id="log"></div>
 </div>
 <div id="stage">
@@ -55,6 +56,7 @@
   function view() {
     var map = PLANES[S.plane].map, members = {};
     if (S.rei) members.Rei = S.rei;
+    if ($('four').checked && S.plane === 'gildhythe') { members.Ash = '229'; members.Tal = '232'; members.Moss = '247'; }
     return LevelCtl.view(S.variant, { hud: 'live', map: map, where: { here: S.here, members: members }, level: S.level, reason: null });
   }
   function draw() {
@@ -83,6 +85,7 @@
     draw();
   }
   $('mainc').addEventListener('click', click); $('tinyc').addEventListener('click', click);
+  $('four').onchange = draw;
   $('plane').onchange = function () { pickPlane(this.value); };
   function cycle(d) { S.variant = VARS[(VARS.indexOf(S.variant) + d + VARS.length) % VARS.length]; draw(); }
   $('prev').onclick = function () { cycle(-1); }; $('next').onclick = function () { cycle(1); };

@@ -19,12 +19,12 @@ html,body{margin:0;height:100%;background:transparent;color:#c9d1d9;font:13px/1.
 #pick button.on{background:#ffd33d;color:#000}
 </style>
 <div id="root"><div id="out"></div>
-<div id="pick">PROTOTYPE <button data-v="A">A Stepper</button><button data-v="B">B Chips</button><button data-v="C">C Ladder</button><button data-v="D">D Stairs</button></div></div>
+<div id="pick">PROTOTYPE <button data-v="E">E Markers</button><button data-v="F">F Counts</button><button data-v="A">A Stepper</button><button data-v="B">B Chips</button><button data-v="C">C Ladder</button><button data-v="D">D Stairs</button></div></div>
 <script>
 ${render}
 ${levels}
 var css=document.createElement('style');css.textContent=MapLook.CSS+'\\n'+LevelCtl.CSS;document.head.appendChild(css);
-var V='A',map=null,where=null,level=null;
+var V='E',map=null,where=null,level=null;
 function reason(){ if(!map) return 'nomap'; if(!Object.keys(map.rooms||{}).length) return 'nocells';
   if(where && !where.here) return 'offplane'; return null; }
 function draw(){
@@ -63,7 +63,7 @@ local CONTENT = [==[
 ${content}
 ]==]
 
-local id, lastMap, lastWhere, variant, level = nil, nil, nil, "A", nil
+local id, lastMap, lastWhere, variant, level = nil, nil, nil, "E", nil
 
 local function myZ()
   local here = lastWhere and lastWhere.here
