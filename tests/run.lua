@@ -1,6 +1,6 @@
 -- luajit tests/run.lua   (from the repo root; exit 1 on the first failure)
 package.path = "lib/?.lua;" .. package.path
-local files = { "countdown_test", "status_test", "effects_test", "slots_test", "recent_test", "doc_test", "pages_test", "quests_test", "bar_test" }   -- explicit list: stock Lua has no directory listing
+local files = { "countdown_test", "status_test", "effects_test", "slots_test", "recent_test", "doc_test", "pages_test", "quests_test", "bar_test", "map_test" }   -- explicit list: stock Lua has no directory listing
 for _, name in ipairs(files) do
   local ok, err = pcall(dofile, "tests/" .. name .. ".lua")
   if not ok then
