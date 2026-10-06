@@ -1,0 +1,95 @@
+<!doctype html>
+<!-- PROTOTYPE — throwaway. Four level controls (A Stepper, B Chips, C Ladder,
+     D Click the stairs) on look A "Tiles", switchable via ?variant=. Wayfinder
+     ticket "How the player steps between levels" (map #17). -->
+<html><head><meta charset="utf-8"><title>Map levels — prototype</title>
+<style>
+  body{margin:0;background:#010409;color:#c9d1d9;font:13px/1.35 "Segoe UI",system-ui,sans-serif;display:flex;gap:16px;padding:16px 16px 70px}
+  #ctl{width:250px;flex:none;display:flex;flex-direction:column;gap:9px}
+  select,button{background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:3px;padding:2px 6px;font:inherit}
+  .note{color:#8b949e;font-size:12px}
+  #stage{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start}
+  .win{background:#0d1117;border:1px solid #30363d;border-radius:6px;overflow:hidden;display:flex;flex-direction:column;resize:both;width:440px;height:420px;min-width:120px;min-height:100px}
+  .win.small{width:230px;height:240px}
+  .win .tb{background:#161b22;color:#8b949e;font-size:12px;padding:3px 8px;border-bottom:1px solid #30363d;flex:none}
+  .win .wc{flex:1;min-height:0;padding:6px;overflow:hidden}
+  #log{white-space:pre-wrap;font:11px/1.3 Consolas,monospace;color:#8b949e;max-height:300px;overflow:auto;background:#0d1117;border:1px solid #30363d;padding:6px;border-radius:4px}
+  #bar{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:#ffd33d;color:#000;border-radius:999px;padding:6px 10px;display:flex;gap:10px;align-items:center;box-shadow:0 4px 18px #000a;font-weight:600;z-index:9}
+  #bar button{background:#000;color:#ffd33d;border:0;border-radius:999px;width:28px;height:28px;cursor:pointer}
+  [data-id]{cursor:pointer}
+</style></head>
+<body>
+<div id="ctl">
+  <label>Plane <select id="plane"></select></label>
+  <div class="note" id="pnote"></div>
+  <div class="note">Click a room to stand there (moving ends Browsing). Shift+click puts <b>Rei</b> there; shift+click Rei's room again to drop Rei.</div>
+  <div class="note">Every level click goes through <code>data-mud-action="level"</code>; the stand-in for Lua below logs it and owns Browsing.</div>
+  <div id="log"></div>
+</div>
+<div id="stage">
+  <div class="win" id="main"><div class="tb">Map</div><div class="wc" id="mainc"></div></div>
+  <div class="win small" id="tiny"><div class="tb">Map (small)</div><div class="wc" id="tinyc"></div></div>
+</div>
+<div id="bar"><button id="prev">←</button><span id="vlabel"></span><button id="next">→</button></div>
+<script src="../map-look/fixtures.js"></script>
+<script src="../map-look/render.js"></script>
+<script src="levels.js"></script>
+<script>
+  var st = document.createElement('style'); st.textContent = MapLook.CSS + '\n' + LevelCtl.CSS; document.head.appendChild(st);
+  var VARS = LevelCtl.VARIANTS, q = new URLSearchParams(location.search);
+  var ORDER = ['gildhythe', 'stubbing', 'lees_depth1', 'lees_depth2', 'canopyloft', 'mereroad', 'spitcut_grown'];
+  var S = { variant: VARS.indexOf(q.get('variant')) >= 0 ? q.get('variant') : 'A', plane: q.get('plane') || 'gildhythe', here: null, rei: null, level: null };
+  var $ = function (id) { return document.getElementById(id); }, lines = [];
+  function log(t) { lines.unshift(t); lines.length = Math.min(lines.length, 40); $('log').textContent = lines.join('\n'); }
+
+  ORDER.forEach(function (n) { var o = document.createElement('option'); o.value = n; o.textContent = PLANES[n].map.area + ' (' + n + ')'; $('plane').appendChild(o); });
+  var START = { gildhythe: '228', stubbing: '1266' }; // beside a stair, so there is one to click
+  function pickPlane(n) {
+    S.plane = n; S.level = null;
+    S.here = START[n] || (WHERES.filter(function (w) { return PLANES[n].map.rooms[w.where.here]; })[0] || { where: { here: Object.keys(PLANES[n].map.rooms)[0] } }).where.here;
+    S.rei = n === 'gildhythe' ? '239' : null; // Rei upstairs, so the other level has someone on it
+    draw();
+  }
+  function mine() { var r = PLANES[S.plane].map.rooms[S.here]; return r ? r.z : null; }
+
+  function view() {
+    var map = PLANES[S.plane].map, members = {};
+    if (S.rei) members.Rei = S.rei;
+    return LevelCtl.view(S.variant, { hud: 'live', map: map, where: { here: S.here, members: members }, level: S.level, reason: null });
+  }
+  function draw() {
+    $('plane').value = S.plane; $('pnote').textContent = PLANES[S.plane].note;
+    $('mainc').innerHTML = MapLook.render('A', view());
+    $('tinyc').innerHTML = MapLook.render('A', view());
+    $('vlabel').textContent = S.variant + ' — ' + LevelCtl.NAMES[S.variant];
+    var u = new URL(location); u.searchParams.set('variant', S.variant); u.searchParams.set('plane', S.plane); history.replaceState(null, '', u);
+  }
+
+  // stand-in for the Lua side: registerWidgetEvent(id, "action", fn(d)) with d.action / d.data
+  function luaAction(d) {
+    if (d.action !== 'level') return;
+    var z = d.data === 'mine' ? null : Number(d.data);
+    S.level = z === mine() ? null : z; // showing your own level is not Browsing
+    log('action level ' + d.data + ' -> ' + (S.level == null ? 'your level' : 'Browsing z ' + S.level));
+    draw();
+  }
+  function click(e) {
+    var a = e.target.closest('[data-mud-action]');
+    if (a) { if (!a.disabled) luaAction({ action: a.getAttribute('data-mud-action'), data: a.getAttribute('data-mud-data') }); return; }
+    var g = e.target.closest('[data-id]'); if (!g) return;
+    var id = g.getAttribute('data-id');
+    if (e.shiftKey) { S.rei = S.rei === id ? null : id; log('Rei ' + (S.rei || 'gone')); }
+    else { if (id !== S.here && S.level != null) log('here ' + id + ': Browsing ends'); else log('here ' + id); if (id !== S.here) S.level = null; S.here = id; }
+    draw();
+  }
+  $('mainc').addEventListener('click', click); $('tinyc').addEventListener('click', click);
+  $('plane').onchange = function () { pickPlane(this.value); };
+  function cycle(d) { S.variant = VARS[(VARS.indexOf(S.variant) + d + VARS.length) % VARS.length]; draw(); }
+  $('prev').onclick = function () { cycle(-1); }; $('next').onclick = function () { cycle(1); };
+  addEventListener('keydown', function (e) {
+    if (e.target.matches('input,textarea,select,[contenteditable]')) return;
+    if (e.key === 'ArrowLeft') cycle(-1); if (e.key === 'ArrowRight') cycle(1);
+  });
+  pickPlane(S.plane);
+</script>
+</body></html>
