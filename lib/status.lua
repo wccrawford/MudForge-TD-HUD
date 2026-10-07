@@ -1,5 +1,5 @@
 -- Status: the view-model behind the Status widget (Condition / Focus /
--- Footing meters, Round Time bar, Standing + Encumbrance + held power).
+-- Footing / Stamina meters, Round Time bar, Standing + Encumbrance + held power).
 -- Pure Lua 5.1 library: the wiring owns a state table from `new()`, feeds it
 -- Feed snapshots and the local clock, and pushes `keys()` through
 -- setBoundValues. Widget states are Unfed / Live / Severed (CONTEXT.md).
@@ -48,6 +48,10 @@ function M.sever(s, now)
   return s
 end
 
+-- Footing's cap: its `max` is the baseline mark of 100, and `cur` may run past
+-- it up to here (ADR 0058's Char.Vitals fields). The cap is not on the wire.
+local FOOTING_CAP = 150
+
 local function pct(cur, max)
   if cur == nil or max == nil or max <= 0 then return 0 end
   local p = cur / max * 100
@@ -55,7 +59,19 @@ local function pct(cur, max)
   return math.floor(p * 10 + 0.5) / 10
 end
 
-local function meter(k, key, m)
+-- The tier ramp is five rungs, 1 best ... 5 worst. A ladder longer than five
+-- (Footing's seven) has its extra rungs above the mark: they read "over1",
+-- "over2" ... counting up from the mark, and the rest shift onto the ramp.
+local function rampTier(tier, of)
+  local over = (of or 5) - 5
+  if over <= 0 then return tier end
+  if tier <= over then return "over" .. (over - tier + 1) end
+  return tier - over
+end
+
+-- `cap` (optional) is the bar's full width when `cur` may pass `max`; the
+-- "Mark" key then places `max` along it.
+local function meter(k, key, m, cap)
   if m == nil then
     k[key .. "Name"] = ""
     k[key .. "Cur"] = ""
@@ -63,14 +79,16 @@ local function meter(k, key, m)
     k[key .. "Tier"] = ""
     k[key .. "Pct"] = "0%"
     k[key .. "Tip"] = ""
+    if cap ~= nil then k[key .. "Mark"] = "0%" end   -- hidden while Unfed
     return
   end
   k[key .. "Name"] = m.name or ""
   k[key .. "Cur"] = m.cur == nil and "" or m.cur
   k[key .. "Max"] = m.max == nil and "" or m.max
-  k[key .. "Tier"] = m.tier == nil and "" or m.tier
-  k[key .. "Pct"] = pct(m.cur, m.max) .. "%"
+  k[key .. "Tier"] = m.tier == nil and "" or rampTier(m.tier, m.of)
+  k[key .. "Pct"] = pct(m.cur, cap or m.max) .. "%"
   k[key .. "Tip"] = tostring(m.cur) .. "/" .. tostring(m.max)
+  if cap ~= nil then k[key .. "Mark"] = pct(m.max, cap) .. "%" end
 end
 
 -- The complete bound-value key set for the Status widget's markup.
@@ -79,7 +97,8 @@ function M.keys(s, now)
   local v = s.vitals or {}
   meter(k, "cond", v.condition)
   meter(k, "focus", v.focus)
-  meter(k, "foot", v.footing)
+  meter(k, "foot", v.footing, FOOTING_CAP)
+  meter(k, "stam", v.stamina)
   if v.power ~= nil then
     k.powerName = v.power.name or ""
     k.powerCur = v.power.cur == nil and "" or v.power.cur
@@ -96,12 +115,11 @@ function M.keys(s, now)
 
   if s.state == "severed" and s.frozen_at ~= nil then now = s.frozen_at end
   local cd = countdown.tick(s.rt, now)
+  -- The bar stays in place with no Round Time running: empty, no seconds.
   if cd ~= nil then
-    k.rtDisplay = ""
     k.rtPct = countdown.pct(cd, now) .. "%"
     k.rtSec = countdown.seconds(cd, now)
   else
-    k.rtDisplay = "none"
     k.rtPct = "0%"
     k.rtSec = ""
   end

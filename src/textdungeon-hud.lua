@@ -28,7 +28,7 @@ local widgets = require("widgets")   -- { status = html, ..., reader = css, bar 
 local GAP = 12
 local COLUMNS = {
   { width = 240, bound = true, widgets = {
-    { name = "status", title = "Status", height = 176 },
+    { name = "status", title = "Status", height = 200 },
     { name = "effects", title = "Effects", height = 164 },   -- five timer rows before scrolling
     { name = "slots", title = "Slots", height = 256 },       -- the villager's twelve rows before scrolling
   } },

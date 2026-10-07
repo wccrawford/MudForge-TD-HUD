@@ -94,7 +94,7 @@ end)()
 __libs["status"] = (function()
   local require = __require
 -- Status: the view-model behind the Status widget (Condition / Focus /
--- Footing meters, Round Time bar, Standing + Encumbrance + held power).
+-- Footing / Stamina meters, Round Time bar, Standing + Encumbrance + held power).
 -- Pure Lua 5.1 library: the wiring owns a state table from `new()`, feeds it
 -- Feed snapshots and the local clock, and pushes `keys()` through
 -- setBoundValues. Widget states are Unfed / Live / Severed (CONTEXT.md).
@@ -143,6 +143,10 @@ function M.sever(s, now)
   return s
 end
 
+-- Footing's cap: its `max` is the baseline mark of 100, and `cur` may run past
+-- it up to here (ADR 0058's Char.Vitals fields). The cap is not on the wire.
+local FOOTING_CAP = 150
+
 local function pct(cur, max)
   if cur == nil or max == nil or max <= 0 then return 0 end
   local p = cur / max * 100
@@ -150,7 +154,19 @@ local function pct(cur, max)
   return math.floor(p * 10 + 0.5) / 10
 end
 
-local function meter(k, key, m)
+-- The tier ramp is five rungs, 1 best ... 5 worst. A ladder longer than five
+-- (Footing's seven) has its extra rungs above the mark: they read "over1",
+-- "over2" ... counting up from the mark, and the rest shift onto the ramp.
+local function rampTier(tier, of)
+  local over = (of or 5) - 5
+  if over <= 0 then return tier end
+  if tier <= over then return "over" .. (over - tier + 1) end
+  return tier - over
+end
+
+-- `cap` (optional) is the bar's full width when `cur` may pass `max`; the
+-- "Mark" key then places `max` along it.
+local function meter(k, key, m, cap)
   if m == nil then
     k[key .. "Name"] = ""
     k[key .. "Cur"] = ""
@@ -158,14 +174,16 @@ local function meter(k, key, m)
     k[key .. "Tier"] = ""
     k[key .. "Pct"] = "0%"
     k[key .. "Tip"] = ""
+    if cap ~= nil then k[key .. "Mark"] = "0%" end   -- hidden while Unfed
     return
   end
   k[key .. "Name"] = m.name or ""
   k[key .. "Cur"] = m.cur == nil and "" or m.cur
   k[key .. "Max"] = m.max == nil and "" or m.max
-  k[key .. "Tier"] = m.tier == nil and "" or m.tier
-  k[key .. "Pct"] = pct(m.cur, m.max) .. "%"
+  k[key .. "Tier"] = m.tier == nil and "" or rampTier(m.tier, m.of)
+  k[key .. "Pct"] = pct(m.cur, cap or m.max) .. "%"
   k[key .. "Tip"] = tostring(m.cur) .. "/" .. tostring(m.max)
+  if cap ~= nil then k[key .. "Mark"] = pct(m.max, cap) .. "%" end
 end
 
 -- The complete bound-value key set for the Status widget's markup.
@@ -174,7 +192,8 @@ function M.keys(s, now)
   local v = s.vitals or {}
   meter(k, "cond", v.condition)
   meter(k, "focus", v.focus)
-  meter(k, "foot", v.footing)
+  meter(k, "foot", v.footing, FOOTING_CAP)
+  meter(k, "stam", v.stamina)
   if v.power ~= nil then
     k.powerName = v.power.name or ""
     k.powerCur = v.power.cur == nil and "" or v.power.cur
@@ -191,12 +210,11 @@ function M.keys(s, now)
 
   if s.state == "severed" and s.frozen_at ~= nil then now = s.frozen_at end
   local cd = countdown.tick(s.rt, now)
+  -- The bar stays in place with no Round Time running: empty, no seconds.
   if cd ~= nil then
-    k.rtDisplay = ""
     k.rtPct = countdown.pct(cd, now) .. "%"
     k.rtSec = countdown.seconds(cd, now)
   else
-    k.rtDisplay = "none"
     k.rtPct = "0%"
     k.rtSec = ""
   end
@@ -1525,9 +1543,9 @@ __libs["widgets"] = {
    the root by the wiring from getWidgetFont; everything inside sizes in em from it */
 html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25 "Segoe UI",system-ui,sans-serif;overflow:hidden}
 *{box-sizing:border-box}
-/* tier ramp: 1 best … 5 worst (Condition / Footing / Focus), red-first like the built-in gauge;
-   power 1 strongest … 4 slightest */
-[data-tier="1"]{--c:#3fb950}[data-tier="2"]{--c:#d4c33a}[data-tier="3"]{--c:#f0883e}[data-tier="4"]{--c:#f25c3c}[data-tier="5"]{--c:#e5232b}
+/* tier ramp: 1 best … 5 worst (Condition / Footing / Stamina / Focus), red-first like the built-in gauge;
+   Footing's two rungs above its mark, over1 … over2 rising; power 1 strongest … 4 slightest */
+[data-tier="over2"]{--c:#2dd4bf}[data-tier="over1"]{--c:#34c58a}[data-tier="1"]{--c:#3fb950}[data-tier="2"]{--c:#d4c33a}[data-tier="3"]{--c:#f0883e}[data-tier="4"]{--c:#f25c3c}[data-tier="5"]{--c:#e5232b}
 [data-ptier="1"]{--p:#c084fc}[data-ptier="2"]{--p:#a78bfa}[data-ptier="3"]{--p:#8b7cf6}[data-ptier="4"]{--p:#6e6ad6}
 .rtc{--rt:#58a6ff}
 /* widget states (CONTEXT.md): Unfed and Severed share one dimmed treatment; Live is full strength */
@@ -1546,6 +1564,8 @@ html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25
   .bar{position:relative;height:1.4em;background:#0d1117;border:1px solid #30363d;border-radius:3px;overflow:hidden}
   .fill{position:absolute;top:0;bottom:0;left:0;background:var(--c,#555);transition:width .25s}
   .word{position:absolute;inset:0;display:flex;align-items:center;padding-left:6px;font-size:.92em;color:#fff;text-shadow:0 0 3px #000,0 0 2px #000;white-space:nowrap}
+  .mark{position:absolute;top:0;bottom:0;width:0;border-left:1px solid #fff}
+  .hud[data-state="unfed"] .mark{display:none}
   .num{color:#8b949e;font-size:.92em;text-align:right;font-variant-numeric:tabular-nums}
   .rt{position:relative;height:1.25em;background:#0d1117;border:1px solid #30363d;border-radius:3px;overflow:hidden;margin-top:2px}
   .rtfill{position:absolute;top:0;bottom:0;left:0;background:var(--rt);transition:width .1s linear}
@@ -1562,9 +1582,12 @@ html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25
     <div class="bar" data-mud-bind-attr="title:focusTip"><div class="fill" data-mud-bind-attr="data-tier:focusTier" data-mud-bind-style="width:focusPct"></div><span class="word" data-mud-bind="focusName"></span></div>
     <span class="num"><span data-mud-bind="focusCur"></span>/<span data-mud-bind="focusMax"></span></span></div>
   <div class="row"><span class="lbl">Footing</span>
-    <div class="bar" data-mud-bind-attr="title:footTip"><div class="fill" data-mud-bind-attr="data-tier:footTier" data-mud-bind-style="width:footPct"></div><span class="word" data-mud-bind="footName"></span></div>
+    <div class="bar" data-mud-bind-attr="title:footTip"><div class="fill" data-mud-bind-attr="data-tier:footTier" data-mud-bind-style="width:footPct"></div><div class="mark" data-mud-bind-style="left:footMark"></div><span class="word" data-mud-bind="footName"></span></div>
     <span class="num"><span data-mud-bind="footCur"></span>/<span data-mud-bind="footMax"></span></span></div>
-  <div class="rt rtc" style="display:none" data-mud-bind-style="display:rtDisplay"><div class="rtfill" data-mud-bind-style="width:rtPct"></div><span class="rtsec" data-mud-bind="rtSec"></span></div>
+  <div class="row"><span class="lbl">Stamina</span>
+    <div class="bar" data-mud-bind-attr="title:stamTip"><div class="fill" data-mud-bind-attr="data-tier:stamTier" data-mud-bind-style="width:stamPct"></div><span class="word" data-mud-bind="stamName"></span></div>
+    <span class="num"><span data-mud-bind="stamCur"></span>/<span data-mud-bind="stamMax"></span></span></div>
+  <div class="rt rtc"><div class="rtfill" data-mud-bind-style="width:rtPct"></div><span class="rtsec" data-mud-bind="rtSec"></span></div>
   <div class="foot">
     <div class="l"><span title="Standing" data-mud-bind="standName"></span><span>Enc <span data-mud-bind="encum"></span>%</span></div>
     <div class="pw" style="display:none" data-mud-bind-attr="data-ptier:powerTier" data-mud-bind-style="display:powerDisplay">Holding <span data-mud-bind="powerName"></span> (<span data-mud-bind="powerCur"></span>)</div>
@@ -1578,9 +1601,9 @@ html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25
    the root by the wiring from getWidgetFont; everything inside sizes in em from it */
 html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25 "Segoe UI",system-ui,sans-serif;overflow:hidden}
 *{box-sizing:border-box}
-/* tier ramp: 1 best … 5 worst (Condition / Footing / Focus), red-first like the built-in gauge;
-   power 1 strongest … 4 slightest */
-[data-tier="1"]{--c:#3fb950}[data-tier="2"]{--c:#d4c33a}[data-tier="3"]{--c:#f0883e}[data-tier="4"]{--c:#f25c3c}[data-tier="5"]{--c:#e5232b}
+/* tier ramp: 1 best … 5 worst (Condition / Footing / Stamina / Focus), red-first like the built-in gauge;
+   Footing's two rungs above its mark, over1 … over2 rising; power 1 strongest … 4 slightest */
+[data-tier="over2"]{--c:#2dd4bf}[data-tier="over1"]{--c:#34c58a}[data-tier="1"]{--c:#3fb950}[data-tier="2"]{--c:#d4c33a}[data-tier="3"]{--c:#f0883e}[data-tier="4"]{--c:#f25c3c}[data-tier="5"]{--c:#e5232b}
 [data-ptier="1"]{--p:#c084fc}[data-ptier="2"]{--p:#a78bfa}[data-ptier="3"]{--p:#8b7cf6}[data-ptier="4"]{--p:#6e6ad6}
 .rtc{--rt:#58a6ff}
 /* widget states (CONTEXT.md): Unfed and Severed share one dimmed treatment; Live is full strength */
@@ -1658,9 +1681,9 @@ html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25
    the root by the wiring from getWidgetFont; everything inside sizes in em from it */
 html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25 "Segoe UI",system-ui,sans-serif;overflow:hidden}
 *{box-sizing:border-box}
-/* tier ramp: 1 best … 5 worst (Condition / Footing / Focus), red-first like the built-in gauge;
-   power 1 strongest … 4 slightest */
-[data-tier="1"]{--c:#3fb950}[data-tier="2"]{--c:#d4c33a}[data-tier="3"]{--c:#f0883e}[data-tier="4"]{--c:#f25c3c}[data-tier="5"]{--c:#e5232b}
+/* tier ramp: 1 best … 5 worst (Condition / Footing / Stamina / Focus), red-first like the built-in gauge;
+   Footing's two rungs above its mark, over1 … over2 rising; power 1 strongest … 4 slightest */
+[data-tier="over2"]{--c:#2dd4bf}[data-tier="over1"]{--c:#34c58a}[data-tier="1"]{--c:#3fb950}[data-tier="2"]{--c:#d4c33a}[data-tier="3"]{--c:#f0883e}[data-tier="4"]{--c:#f25c3c}[data-tier="5"]{--c:#e5232b}
 [data-ptier="1"]{--p:#c084fc}[data-ptier="2"]{--p:#a78bfa}[data-ptier="3"]{--p:#8b7cf6}[data-ptier="4"]{--p:#6e6ad6}
 .rtc{--rt:#58a6ff}
 /* widget states (CONTEXT.md): Unfed and Severed share one dimmed treatment; Live is full strength */
@@ -1713,9 +1736,9 @@ html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25
    the root by the wiring from getWidgetFont; everything inside sizes in em from it */
 html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25 "Segoe UI",system-ui,sans-serif;overflow:hidden}
 *{box-sizing:border-box}
-/* tier ramp: 1 best … 5 worst (Condition / Footing / Focus), red-first like the built-in gauge;
-   power 1 strongest … 4 slightest */
-[data-tier="1"]{--c:#3fb950}[data-tier="2"]{--c:#d4c33a}[data-tier="3"]{--c:#f0883e}[data-tier="4"]{--c:#f25c3c}[data-tier="5"]{--c:#e5232b}
+/* tier ramp: 1 best … 5 worst (Condition / Footing / Stamina / Focus), red-first like the built-in gauge;
+   Footing's two rungs above its mark, over1 … over2 rising; power 1 strongest … 4 slightest */
+[data-tier="over2"]{--c:#2dd4bf}[data-tier="over1"]{--c:#34c58a}[data-tier="1"]{--c:#3fb950}[data-tier="2"]{--c:#d4c33a}[data-tier="3"]{--c:#f0883e}[data-tier="4"]{--c:#f25c3c}[data-tier="5"]{--c:#e5232b}
 [data-ptier="1"]{--p:#c084fc}[data-ptier="2"]{--p:#a78bfa}[data-ptier="3"]{--p:#8b7cf6}[data-ptier="4"]{--p:#6e6ad6}
 .rtc{--rt:#58a6ff}
 /* widget states (CONTEXT.md): Unfed and Severed share one dimmed treatment; Live is full strength */
@@ -1767,9 +1790,9 @@ html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25
    the root by the wiring from getWidgetFont; everything inside sizes in em from it */
 html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25 "Segoe UI",system-ui,sans-serif;overflow:hidden}
 *{box-sizing:border-box}
-/* tier ramp: 1 best … 5 worst (Condition / Footing / Focus), red-first like the built-in gauge;
-   power 1 strongest … 4 slightest */
-[data-tier="1"]{--c:#3fb950}[data-tier="2"]{--c:#d4c33a}[data-tier="3"]{--c:#f0883e}[data-tier="4"]{--c:#f25c3c}[data-tier="5"]{--c:#e5232b}
+/* tier ramp: 1 best … 5 worst (Condition / Footing / Stamina / Focus), red-first like the built-in gauge;
+   Footing's two rungs above its mark, over1 … over2 rising; power 1 strongest … 4 slightest */
+[data-tier="over2"]{--c:#2dd4bf}[data-tier="over1"]{--c:#34c58a}[data-tier="1"]{--c:#3fb950}[data-tier="2"]{--c:#d4c33a}[data-tier="3"]{--c:#f0883e}[data-tier="4"]{--c:#f25c3c}[data-tier="5"]{--c:#e5232b}
 [data-ptier="1"]{--p:#c084fc}[data-ptier="2"]{--p:#a78bfa}[data-ptier="3"]{--p:#8b7cf6}[data-ptier="4"]{--p:#6e6ad6}
 .rtc{--rt:#58a6ff}
 /* widget states (CONTEXT.md): Unfed and Severed share one dimmed treatment; Live is full strength */
@@ -1793,9 +1816,9 @@ html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25
    the root by the wiring from getWidgetFont; everything inside sizes in em from it */
 html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25 "Segoe UI",system-ui,sans-serif;overflow:hidden}
 *{box-sizing:border-box}
-/* tier ramp: 1 best … 5 worst (Condition / Footing / Focus), red-first like the built-in gauge;
-   power 1 strongest … 4 slightest */
-[data-tier="1"]{--c:#3fb950}[data-tier="2"]{--c:#d4c33a}[data-tier="3"]{--c:#f0883e}[data-tier="4"]{--c:#f25c3c}[data-tier="5"]{--c:#e5232b}
+/* tier ramp: 1 best … 5 worst (Condition / Footing / Stamina / Focus), red-first like the built-in gauge;
+   Footing's two rungs above its mark, over1 … over2 rising; power 1 strongest … 4 slightest */
+[data-tier="over2"]{--c:#2dd4bf}[data-tier="over1"]{--c:#34c58a}[data-tier="1"]{--c:#3fb950}[data-tier="2"]{--c:#d4c33a}[data-tier="3"]{--c:#f0883e}[data-tier="4"]{--c:#f25c3c}[data-tier="5"]{--c:#e5232b}
 [data-ptier="1"]{--p:#c084fc}[data-ptier="2"]{--p:#a78bfa}[data-ptier="3"]{--p:#8b7cf6}[data-ptier="4"]{--p:#6e6ad6}
 .rtc{--rt:#58a6ff}
 /* widget states (CONTEXT.md): Unfed and Severed share one dimmed treatment; Live is full strength */
@@ -1867,7 +1890,7 @@ local widgets = require("widgets")   -- { status = html, ..., reader = css, bar 
 local GAP = 12
 local COLUMNS = {
   { width = 240, bound = true, widgets = {
-    { name = "status", title = "Status", height = 176 },
+    { name = "status", title = "Status", height = 200 },
     { name = "effects", title = "Effects", height = 164 },   -- five timer rows before scrolling
     { name = "slots", title = "Slots", height = 256 },       -- the villager's twelve rows before scrolling
   } },

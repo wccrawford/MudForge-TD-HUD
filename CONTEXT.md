@@ -23,7 +23,7 @@ A push that lengthens a running Round Time beyond its dead-band — a new charge
 _Avoid_: extension, bump
 
 **Clear**:
-The instant a Countdown reaches zero; the Round Time bar vanishes on that tick and never shows `0`. Local Clear is authoritative — no push is waited for.
+The instant a Countdown reaches zero; the Round Time bar empties on that tick and never shows `0`; the bar itself stays in place. Local Clear is authoritative — no push is waited for.
 _Avoid_: expire, finish, lapse (the server's word for the same instant, seen from its side)
 
 **Span**:

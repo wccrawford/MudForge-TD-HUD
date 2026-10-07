@@ -3,9 +3,9 @@
    the root by the wiring from getWidgetFont; everything inside sizes in em from it */
 html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25 "Segoe UI",system-ui,sans-serif;overflow:hidden}
 *{box-sizing:border-box}
-/* tier ramp: 1 best … 5 worst (Condition / Footing / Focus), red-first like the built-in gauge;
-   power 1 strongest … 4 slightest */
-[data-tier="1"]{--c:#3fb950}[data-tier="2"]{--c:#d4c33a}[data-tier="3"]{--c:#f0883e}[data-tier="4"]{--c:#f25c3c}[data-tier="5"]{--c:#e5232b}
+/* tier ramp: 1 best … 5 worst (Condition / Footing / Stamina / Focus), red-first like the built-in gauge;
+   Footing's two rungs above its mark, over1 … over2 rising; power 1 strongest … 4 slightest */
+[data-tier="over2"]{--c:#2dd4bf}[data-tier="over1"]{--c:#34c58a}[data-tier="1"]{--c:#3fb950}[data-tier="2"]{--c:#d4c33a}[data-tier="3"]{--c:#f0883e}[data-tier="4"]{--c:#f25c3c}[data-tier="5"]{--c:#e5232b}
 [data-ptier="1"]{--p:#c084fc}[data-ptier="2"]{--p:#a78bfa}[data-ptier="3"]{--p:#8b7cf6}[data-ptier="4"]{--p:#6e6ad6}
 .rtc{--rt:#58a6ff}
 /* widget states (CONTEXT.md): Unfed and Severed share one dimmed treatment; Live is full strength */
