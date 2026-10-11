@@ -21,24 +21,29 @@ local map = require("map")
 local doc = require("doc")
 local widgets = require("widgets")   -- { status = html, ..., reader = css, bar = css }, built from src/widgets/
 
--- Top-anchored columns from the right edge (wayfinder #14): the state column
--- (Status / Effects / Slots) against the edge, the reader column (the
--- Windows bar, Quest, Page) to its left, the Map to its left (map #17),
--- 12 px from the edge and between widgets. Heights include MudForge's title bar.
-local GAP = 12
+-- Two columns docked flush to the window's left and right edges, top to
+-- bottom, 4 px between widgets: the Windows bar, Slots, Effects and Status
+-- on the left; the Map, Quest and Page on the right. Each column fills the
+-- window's height: its one `fill` widget takes what the others leave (at
+-- least its `height`, which is also its height when the window size is
+-- unknown). Heights include MudForge's title bar. `bound` widgets get their
+-- content once at creation; the others are rendered whole, below.
+local GAP = 4
+-- getWindowSize() is the whole page (window.innerWidth/innerHeight); widgets
+-- sit between MudForge's top bar and its footer, 97 px together (measured in
+-- desktop 2.0, 2026-10-11).
+local CHROME_HEIGHT = 97
 local COLUMNS = {
-  { width = 240, bound = true, widgets = {
-    { name = "status", title = "Status", height = 200 },
-    { name = "effects", title = "Effects", height = 164 },   -- five timer rows before scrolling
-    { name = "slots", title = "Slots", height = 256 },       -- the villager's twelve rows before scrolling
+  { side = "left", width = 484, widgets = {
+    { name = "bar", title = "Windows", height = 68 },        -- one row of buttons
+    { name = "slots", title = "Slots", height = 256, bound = true, fill = true },
+    { name = "effects", title = "Effects", height = 150, bound = true },
+    { name = "status", title = "Status", height = 190, bound = true },
   } },
-  { width = 360, widgets = {
-    { name = "bar", title = "Windows", height = 76 },
+  { side = "right", width = 576, widgets = {
+    { name = "map", title = "Map", height = 380, fill = true },
     { name = "quest", title = "Quest", height = 300 },
-    { name = "page", title = "Page", height = 360 },
-  } },
-  { width = 340, widgets = {
-    { name = "map", title = "Map", height = 380 },
+    { name = "page", title = "Page", height = 280 },
   } },
 }
 -- What the Windows bar opens, in bar order; never the bar itself.
@@ -63,30 +68,41 @@ local hud = {
 local tick = nil
 local repushDue = false   -- one re-push owed after init set the content
 
+-- The height of a column's `fill` widget: the window's height less every
+-- other widget and the gaps, never under its own `height`.
+local function fillHeight(col, w, winHeight)
+  if winHeight == nil then return w.height end
+  local left = winHeight - GAP * (#col.widgets - 1)
+  for _, o in ipairs(col.widgets) do
+    if o ~= w then left = left - o.height end
+  end
+  if left < w.height then return w.height end
+  return left
+end
+
 -- Create every widget down its column. MudForge's saved placement overrides
--- these positions on later loads, so this only decides first install. A
--- `bound` column's content is set once here; the reader column's widgets
--- are rendered whole, below.
+-- these positions on later loads, so this only decides first install.
 local function createColumns()
   local win = getWindowSize() or {}
-  local right = (win.width or 0) - GAP
   for _, col in ipairs(COLUMNS) do
-    local x = right - col.width
+    local x = 0
+    if col.side == "right" then x = (win.width or 0) - col.width end
     if x < 0 then x = 0 end
-    local y = GAP
+    local y = 0
     for _, w in ipairs(col.widgets) do
+      local h = w.height
+      if w.fill then h = fillHeight(col, w, win.height and win.height - CHROME_HEIGHT) end
       local id = createWidget({
         type = "html",
         name = w.name,
         title = w.title,
         position = { x = x, y = y },
-        size = { width = col.width, height = w.height },
+        size = { width = col.width, height = h },
       })
-      if col.bound then setWidgetProperty(id, "content", widgets[w.name]) end
+      if w.bound then setWidgetProperty(id, "content", widgets[w.name]) end
       hud[w.name].id = id
-      y = y + w.height + GAP
+      y = y + h + GAP
     end
-    right = x - GAP
   end
 end
 
