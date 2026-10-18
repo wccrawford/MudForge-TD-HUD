@@ -15,6 +15,12 @@ M.VARIANTS = {
     leads = "tip", legend = true, controls = "footer" },
   C = { name = "District lines", shape = "merged", ring = "part", ward = "border", label = "above",
     leads = "fit", legend = true, controls = "overlay" },
+  -- the user, after A-C: C's names beside and dashed Ward lines; Rooms merged but in the
+  -- background, a dot for each Cell and lines between them to show the ways to move
+  D = { name = "Floor and dots", shape = "merged", ring = "part", ward = "border", label = "above",
+    leads = "fit", legend = true, controls = "footer", floor = true },
+  D2 = { name = "Floor and dots, every Room", shape = "merged", ring = "part", ward = "border", label = "above",
+    leads = "fit", legend = true, controls = "footer", floor = true, floorAll = true },
 }
 
 -- lib/map.lua's state, plus the keys v0.6.0's copyRoom drops
@@ -336,8 +342,11 @@ function M.svg(s, v)
     end
   end
 
+  -- D: Room floors go under the edges, so the lines between a Room's Cells show
+  local floorAt, floors = #g + 1, {}
+  add("")
   for _, e in ipairs(edges) do
-    if not e.inside then
+    if not e.inside or v.floor then
       add(line(px(e.a), py(e.a), px(e.b), py(e.b), 'stroke="' .. LINE .. '" stroke-width="' .. EDGE .. '"'
         .. (e.far and ' stroke-dasharray="3 2"' or "")))
     end
@@ -381,7 +390,11 @@ function M.svg(s, v)
   local function terrainOf(Rm) return s.rooms[s.rooms[Rm.id] and Rm.id or Rm.parts[1]].terrain end
   for _, rid in ipairs(order) do
     local Rm = R[rid]
-    if #Rm.parts == 1 or Rm.kind == "tiles" then
+    if v.floorAll and #Rm.parts == 1 then
+      local r = s.rooms[Rm.parts[1]]
+      Rm.kind, Rm.box = "rect", { x0 = r.x, x1 = r.x, y0 = r.y, y1 = r.y }
+    end
+    if (#Rm.parts == 1 and not v.floorAll) or Rm.kind == "tiles" then
       for _, id in ipairs(Rm.parts) do
         local o = cellsO[id]
         local r = o.r
@@ -412,12 +425,18 @@ function M.svg(s, v)
         fr = 'translate(' .. n(b.cx) .. " " .. n(b.cy) .. ") rotate(" .. n(b.deg) .. ") translate(" .. n(-b.len / 2) .. " " .. n(-b.th / 2) .. ")"
         w, h = b.len, b.th
       end
-      add('<g class="room multi" transform="' .. fr .. '"><rect width="' .. n(w) .. '" height="' .. n(h) .. '" rx="2" fill="' .. (TERRAIN[terr] or NONE) .. '"'
-        .. (TERRAIN[terr] and "" or ' stroke="#6e7681" stroke-width=".8"') .. "/>")
+      local shape = '<rect width="' .. n(w) .. '" height="' .. n(h) .. '" rx="2" fill="' .. (TERRAIN[terr] or NONE) .. '"'
+        .. (TERRAIN[terr] and "" or ' stroke="#6e7681" stroke-width=".8"') .. "/>"
       if terr == "inside" then
-        add('<rect x="2.5" y="2.5" width="' .. n(w - 5) .. '" height="' .. n(h - 5) .. '" rx="1" fill="none" ' .. INK .. ' stroke-width="1.1"/>')
+        shape = shape .. '<rect x="2.5" y="2.5" width="' .. n(w - 5) .. '" height="' .. n(h - 5) .. '" rx="1" fill="none" ' .. INK .. ' stroke-width="1.1"/>'
       elseif PAT[terr] then
-        add('<rect width="' .. n(w) .. '" height="' .. n(h) .. '" rx="2" fill="url(#pA-' .. terr .. ')"/>')
+        shape = shape .. '<rect width="' .. n(w) .. '" height="' .. n(h) .. '" rx="2" fill="url(#pA-' .. terr .. ')"/>'
+      end
+      if v.floor then
+        floors[#floors + 1] = '<g class="floor" opacity=".38" transform="' .. fr .. '">' .. shape .. "</g>"
+        add('<g class="room multi" transform="' .. fr .. '">')
+      else
+        add('<g class="room multi" transform="' .. fr .. '">' .. shape)
       end
       -- each part keeps its own tooltip: an unpainted hit area over its share of the shape
       for i, id in ipairs(Rm.parts) do
@@ -440,10 +459,17 @@ function M.svg(s, v)
           .. doc.escape(tip(s, id, cellsO[id])) .. "</title></rect>")
       end
       add("</g>")
+      if v.floor then
+        for _, id in ipairs(Rm.parts) do
+          local r = s.rooms[id]
+          add('<circle class="dot" cx="' .. n(px(r)) .. '" cy="' .. n(py(r)) .. '" r="3.6" fill="' .. (TERRAIN[r.terrain] or NONE) .. '" stroke="' .. DARK
+            .. '" stroke-width="1.2"><title>' .. doc.escape(tip(s, id, cellsO[id])) .. "</title></circle>")
+        end
+      end
       local own = bbox(o)
       boxes[#boxes + 1] = own
       local nm = s.names[rid]
-      if nm then roomLabels[#roomLabels + 1] = { R = Rm, o = o, text = nm, box = own } end
+      if nm and #Rm.parts > 1 then roomLabels[#roomLabels + 1] = { R = Rm, o = o, text = nm, box = own } end
     end
   end
 
@@ -645,6 +671,8 @@ function M.svg(s, v)
   end
   for _, d in ipairs(doors) do add(d) end
   for _, m in ipairs(marks) do add(m) end
+
+  g[floorAt] = table.concat(floors)
 
   -- the frame holds every label too (a lead past the Plane's edge was cut off)
   local fx0, fy0, fx1, fy1 = x0 * U - PAD, -y1 * U - PAD, x1 * U + PAD, -y0 * U + PAD

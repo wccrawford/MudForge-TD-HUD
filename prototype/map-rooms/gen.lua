@@ -61,7 +61,7 @@ end
 
 local out = { "var DOCS={", "};" }
 local docs, meta = {}, {}
-for _, key in ipairs({ "A", "B", "C" }) do
+for _, key in ipairs({ "A", "B", "C", "D", "D2" }) do
   local v = rooms.VARIANTS[key]
   local rows = {}
   for i, P in ipairs(PLANES) do
