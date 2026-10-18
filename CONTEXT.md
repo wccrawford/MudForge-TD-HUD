@@ -74,8 +74,28 @@ _Avoid_: toolbar, menu
 Everything one `Area.Map` carries: the cells and edges of every level of the Area the player stands in. The next `Area.Map` replaces it whole, and nothing is merged or remembered. A Delve growing, a door opening, a Depth descending and an Expedition crossing are each just a new Plane.
 _Avoid_: map (the verb, the window, and the server's term), zone
 
+**Cell**:
+One map id of the Plane: its `x`, `y`, `z`, terrain and edges. It is what the package keys `rooms` by, but it is not a Room.
+_Avoid_: room (for one map id), tile (the drawing of a Cell), location
+
+**Room**:
+One or more Cells on one level, drawn as one shape and named once (`names`). The Cells that carry the same `room` key are one Room; a Cell with no `room` key is a Room by itself. A Room's id is opaque. Every Cell's tooltip names its Room, and only a Room of two or more Cells gets a label drawn on the map.
+_Avoid_: area, zone, part (the server's word for one Cell of a Room)
+
+**Diagonal run**:
+A Room whose Cells don't fill their bounding box: a street stepping one diagonal at a time. It is drawn as one band along the diagonal, never as its box. Nothing on the wire marks it.
+_Avoid_: diagonal room, slant
+
+**Ward**:
+A named district of a Settlement (`ward` on a Cell, its name in `wards`). The map is shaded by Ward. A dangerous Ward has its own Plane, and on the Settlement's Plane it is a Ward with no Cells.
+_Avoid_: district, quarter, region (the package's `region` is something else)
+
+**Lead**:
+The name of the place a leaving way enters (`leads`), shown in the tooltip of its stub and its Cell.
+_Avoid_: destination, target
+
 **Held position**:
-The newest `Area.Where` whose `here` is not on the Plane yet, kept until a Plane that holds it arrives. Only one is held. It never moves a marker: markers move only to a room that is on the Plane.
+The newest `Area.Where` whose `here` is not on the Plane yet, kept until a Plane that holds it arrives. Only one is held. It never moves a marker: markers move only to a Cell that is on the Plane.
 _Avoid_: pending, queued
 
 **Level shown**:
@@ -85,6 +105,14 @@ _Avoid_: floor, layer, z (the field, not the view)
 **Browsing**:
 Showing a level other than the player's. It ends when the player moves (`here` changes), when a Plane for another Area arrives, or when the browsed level is gone. A member moving, or a re-sent Plane for the same Area, leaves it alone.
 _Avoid_: scrolling, peeking
+
+**Following**:
+Keeping the player in view at a fixed zoom: a step re-centres the view on them. A level that fits the window holds still and centred; a bigger one follows the player and stops at the Plane's edges. The zoom is one size on every Plane, changed in steps by the player and remembered.
+_Avoid_: tracking, auto-scroll
+
+**Panned**:
+The view moved away from the player by a drag. It ends when the player moves, when a Plane for another Area arrives, or on centre-on-me. A member moving, a re-sent Plane for the same Area, or Browsing another level (which keeps the same x/y centre) leaves it alone.
+_Avoid_: scrolled, offset
 
 **No-plane reason**:
 The single line a Live Map window shows instead of a drawing: no `Area.Map` this connection (not told apart from `config map off`), an Area with no cells (`rooms: {}`), or the player off the Plane (`Area.Where` without `here`). Unfed and Severed windows never show one.
