@@ -38,7 +38,7 @@ down: stairs</title><rect width="12" height="12" rx="2" fill="#a371f7"/><rect wi
 plugin = {
   id = "panprobe",
   name = "panprobe",
-  version = "0.0.3",
+  version = "0.0.4",
   author = "wccrawford",
   description = "PROTOTYPE: Map follow/zoom/pan probes (wayfinder #35).",
 }
@@ -48,7 +48,7 @@ local logl = {}
 local ZOOMS = { 20, 24, 28, 34, 40, 48, 56 }
 local zoomAt = 4    -- 34 px per cell; kept across probes as a real window would
 local opens = 0     -- each window gets its own name
-local VERSION = "0.0.3"
+local VERSION = "0.0.4"
 
 local function say(s)
   logl[#logl + 1] = s
@@ -126,10 +126,10 @@ document.getElementById('me').onclick=function(){S.pan=[0,0];layout();report()};
 addEventListener('resize',function(){clampPan();layout()});
 function done(key,t){requestAnimationFrame(function(){mudforge.send('done',{k:key,js:performance.now()-t})})}
 mudforge.onMessage(function(d){var t=performance.now();
- if(d.you){S.here=[d.you[0],d.you[1]];S.pan=[0,0];S.name=d.name;
-  document.getElementById('you').setAttribute('transform','translate('+d.you[0]+' '+d.you[1]+')')}
+ if(d.you){S.here=[d.you.x,d.you.y];S.pan=[0,0];S.name=d.name;
+  document.getElementById('you').setAttribute('transform','translate('+d.you.x+' '+d.you.y+')')}
  if(d.enc)document.getElementById('em').textContent=d.enc;
- if(d.mem)document.getElementById('mem').setAttribute('transform','translate('+d.mem[0]+' '+d.mem[1]+')');
+ if(d.mem)document.getElementById('mem').setAttribute('transform','translate('+d.mem.x+' '+d.mem.y+')');
  layout();done(d.k,t)});
 layout();done(S.k,t0);</script>]==]
 end
@@ -143,8 +143,9 @@ local function send(k, you, mem, first)
     P.bytes = #s
   else
     local d = { k = k }
-    if you then d.you = { you[2], you[3] }; d.name = you[4]; d.enc = "caf\195\169" end
-    if mem then d.mem = { mem[2], mem[3] } end
+    -- objects, not arrays: arrays don't cross between Lua and the page intact
+    if you then d.you = { x = you[2], y = you[3] }; d.name = you[4]; d.enc = "caf\195\169" end
+    if mem then d.mem = { x = mem[2], y = mem[3] } end
     sendWidgetMessage(P.id, d)
     P.bytes = #json.encode(d)
   end
