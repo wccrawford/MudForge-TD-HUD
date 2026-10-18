@@ -19,6 +19,8 @@ local PLANES = {
   { "plane_synthetic_ward_wilds", "the Rookery (synthetic: a dangerous Ward's own Wilds)", { here = "602", members = {} } },
   { "plane_synthetic_delve_rooms", "the Lees, Depth 3 (synthetic: a Delve Room)", { here = "d2", members = { Rei = "d4" } } },
   { "plane_gildhythe_named", "Gildhythe (live: names + leads, 2 levels)", nil },
+  { "plane_gildhythe_named", "Gildhythe with made-up Wards (stress test: four Wards meeting along diagonals)", nil, "wedges" },
+  { "plane_gildhythe_named", "Gildhythe, worst case (one crossing made a checkerboard: two Wards' diagonals cross)", nil, "checker" },
   { "plane_greenroad_named", "the Green Road (live: leads on every side)", nil },
   { "plane_ochrefringe_named", "the Ochre Fringe (live: big wilds)", nil },
   { "plane_tallyglass_named", "the Tally Glass (live: tiny, 2 levels)", nil },
@@ -61,11 +63,25 @@ end
 
 local out = { "var DOCS={", "};" }
 local docs, meta = {}, {}
-for _, key in ipairs({ "A", "B", "C", "D", "D2" }) do
+for _, key in ipairs({ "A", "B", "C", "D" }) do
   local v = rooms.VARIANTS[key]
   local rows = {}
   for i, P in ipairs(PLANES) do
     local pkg = dofile("tests/fixtures/map/" .. P[1] .. ".lua")
+    if P[4] == "wedges" or P[4] == "checker" then
+      -- four Wards cut from Gildhythe by its diagonals through the middle of level 0
+      local sx, sy, c = 0, 0, 0
+      for _, r in pairs(pkg.rooms) do if r.z == 0 then sx, sy, c = sx + r.x, sy + r.y, c + 1 end end
+      local cx, cy = math.floor(sx / c + 0.5), math.floor(sy / c + 0.5)
+      for _, r in pairs(pkg.rooms) do
+        local dx, dy = r.x - cx, r.y - cy
+        r.ward = math.abs(dx) > math.abs(dy) and (dx > 0 and "east" or "west") or (dy >= 0 and "north" or "south")
+      end
+      if P[4] == "checker" then
+        for _, r in pairs(pkg.rooms) do if r.z == 0 and r.x == cx and r.y == cy + 1 then r.ward = "west" end end
+      end
+      pkg.wards = { east = "the Dye Reach", west = "Bandside", north = "the Upper Hythe", south = "Strongbox Row" }
+    end
     local w = P[3] or where(pkg)
     local s = rooms.feed(pkg, w)
     local html, info = rooms.html(s, v)

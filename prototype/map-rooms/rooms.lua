@@ -17,7 +17,9 @@ M.VARIANTS = {
     leads = "fit", legend = true, controls = "overlay" },
   -- the user, after A-C: C's names beside and dashed Ward lines; Rooms merged but in the
   -- background, a dot for each Cell and lines between them to show the ways to move
-  D = { name = "Floor and dots", shape = "merged", ring = "part", ward = "border", label = "above",
+  -- the user, on D: the Ward lines cut the Diagonal run off from its own Ward, so a Ward
+  -- now bridges two of its Cells joined by a diagonal exit ("diag")
+  D = { name = "Floor and dots", shape = "merged", ring = "part", ward = "diag", label = "above",
     leads = "fit", legend = true, controls = "footer", floor = true },
   D2 = { name = "Floor and dots, every Room", shape = "merged", ring = "part", ward = "border", label = "above",
     leads = "fit", legend = true, controls = "footer", floor = true, floorAll = true },
@@ -307,7 +309,55 @@ function M.svg(s, v)
 
   -- Ward shading under everything: A an underlay of whole cells, C the same faint plus
   -- a dashed line round each Ward; B outlines each shape (drawn with the shape)
-  if v.ward == "underlay" or v.ward == "border" then
+  if v.ward == "diag" then
+    -- a Ward is the union of its Cells' squares and a band along each diagonal exit
+    -- between two of its Cells; its dashed line is that union's outline, drawn as each
+    -- piece's stroke masked to outside the union (so nothing inside it shows)
+    local idOf, shapes = {}, {}
+    for id, o in pairs(cellsO) do idOf[o.r] = id end
+    for _, id in ipairs(sortedKeys(cellsO)) do
+      local e = s.extra[id]
+      if e and e.ward then
+        local r = s.rooms[id]
+        shapes[e.ward] = shapes[e.ward] or {}
+        table.insert(shapes[e.ward], '<rect x="' .. n(px(r) - U / 2) .. '" y="' .. n(py(r) - U / 2) .. '" width="' .. U .. '" height="' .. U .. '"/>')
+      end
+    end
+    local BW = 10   -- under 2 x 5.66, so a bridge never reaches the other two Cells' tiles
+    -- the bridges, by the 2x2 block they cross; two Wards crossing in one block (a
+    -- checkerboard at an X) would draw a dashed diamond over the crossing, so neither is drawn
+    local blocks, keys = {}, {}
+    for _, ed in ipairs(edges) do
+      local a, b = ed.a, ed.b
+      if math.abs(a.x - b.x) == 1 and math.abs(a.y - b.y) == 1 then
+        local wa, wb = (s.extra[idOf[a]] or {}).ward, (s.extra[idOf[b]] or {}).ward
+        if wa and wa == wb then
+          local k = math.min(a.x, b.x) .. "," .. math.min(a.y, b.y)
+          if not blocks[k] then blocks[k] = {}; keys[#keys + 1] = k end
+          table.insert(blocks[k], { a = a, b = b, ward = wa })
+        end
+      end
+    end
+    for _, k in ipairs(keys) do
+      local bs = blocks[k]
+      if not (#bs == 2 and bs[1].ward ~= bs[2].ward) then
+        for _, br in ipairs(bs) do
+          local ax, ay, bx, by = px(br.a), py(br.a), px(br.b), py(br.b)
+          local L = math.sqrt((bx - ax) ^ 2 + (by - ay) ^ 2)
+          local nx, ny = -(by - ay) / L * BW / 2, (bx - ax) / L * BW / 2
+          table.insert(shapes[br.ward], '<polygon points="' .. n(ax + nx) .. "," .. n(ay + ny) .. " " .. n(bx + nx) .. "," .. n(by + ny) .. " "
+            .. n(bx - nx) .. "," .. n(by - ny) .. " " .. n(ax - nx) .. "," .. n(ay - ny) .. '"/>')
+        end
+      end
+    end
+    for _, w in ipairs(sortedKeys(shapes)) do
+      local col, body, mid = M.wardColour(s, w), table.concat(shapes[w]), "wm-" .. w:gsub("[^%w_]", "_")
+      add('<g class="ward" opacity=".1" fill="' .. col .. '">' .. body .. "</g>")
+      add('<mask id="' .. mid .. '" maskUnits="userSpaceOnUse" x="-99999" y="-99999" width="199998" height="199998"><rect x="-99999" y="-99999" width="199998" height="199998" fill="#fff"/><g fill="#000">'
+        .. body .. "</g></mask>")
+      add('<g class="wardline" mask="url(#' .. mid .. ')" fill="none" stroke="' .. col .. '" stroke-width="2.4" stroke-dasharray="3 2" stroke-opacity=".85">' .. body .. "</g>")
+    end
+  elseif v.ward == "underlay" or v.ward == "border" then
     local paths, lines = {}, {}
     for _, id in ipairs(sortedKeys(cellsO)) do
       local e = s.extra[id]
