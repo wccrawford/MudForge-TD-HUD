@@ -1,0 +1,46 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>PROTOTYPE map rooms (#31)</title>
+<style>
+body{margin:0;background:#010409;color:#c9d1d9;font:13px/1.4 "Segoe UI",system-ui,sans-serif;padding:14px 18px 70px}
+h1{font-size:16px;margin:0 0 4px;color:#e6edf3}
+.sub{color:#8b949e;margin:0 0 10px;max-width:70em}
+.what{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:8px 12px;margin:0 0 14px;max-width:70em}
+.what b{color:#e6edf3}
+.what td{padding:1px 14px 1px 0;vertical-align:top}
+.row{margin:0 0 18px}
+.row h2{font-size:13px;margin:0 0 4px;color:#e6edf3;font-weight:600}
+.frames{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap}
+.frames figure{margin:0}
+.frames figcaption{font-size:11px;color:#6e7681}
+iframe{border:1px solid #30363d;border-radius:4px;background:#0d1117;display:block}
+.notes{font-size:12px;color:#8b949e;margin-top:4px}
+#bar{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);display:flex;align-items:center;gap:10px;background:#f0f6fc;color:#0d1117;border-radius:999px;padding:6px 10px;box-shadow:0 4px 18px #000a;font-weight:600;z-index:9}
+#bar button{border:0;background:#0d1117;color:#f0f6fc;border-radius:50%;width:28px;height:28px;cursor:pointer;font-size:14px}
+#bar span{min-width:13em;text-align:center}
+</style></head><body>
+<h1>PROTOTYPE: Rooms, Ward shading and labels (wayfinder #31)</h1>
+<p class="sub">Look A "Tiles" at the fixed 34 px per cell (Following), drawn from the fixtures. Each window is a real page: drag to pan, wheel or &minus;/+ to zoom, &#9678; to centre on you, hover for tooltips. Small window 260&times;230, large 460&times;380. Synthetic planes stand in for keys no live World sends yet. Switch variants with the bar or &larr;/&rarr;.</p>
+<div class="what" id="what"></div>
+<div id="rows"></div>
+<div id="bar"><button id="prev">&larr;</button><span id="lab"></span><button id="next">&rarr;</button></div>
+<script>
+/*DOCS*/
+var AXES={
+ A:[["Room","one rectangle over its tiles' footprint, gaps bridged; a Diagonal run a band of tile width"],["You","v0.6.0's ring round your Cell"],["Ward","an underlay: each Cell's whole square tinted, so a Ward reads as ground"],["Room label","inside the shape along its long side; dropped when it won't fit"],["Leads","hover only (stub and Cell tooltips)"],["Ward legend","none: hover only"],["Zoom, centre","in the footer bar, beside the level control"]],
+ B:[["Room","a block filling its Cells nearly to the edge (plaza), bigger than a lone tile; a Diagonal run a wider band"],["You","the ring goes round the whole Room"],["Ward","an outline: a ring in the Ward's hue round every tile and Room"],["Room label","a dark plaque centred on the Room"],["Leads","a label at every stub's tip, always"],["Ward legend","a row under the map (hollow swatch: a Ward with no Cells)"],["Zoom, centre","in the footer bar, beside the level control"]],
+ C:[["Room","as A"],["You","as A"],["Ward","faint tint plus a dashed line round each Ward's edge"],["Room label","just above the Room, never over another label"],["Leads","a label at the stub's tip only where it covers no tile or label; else hover"],["Ward legend","a row under the map"],["Zoom, centre","floating over the map's top-right corner; the footer only for levels"]]};
+var keys=["A","B","C"];
+var cur=new URLSearchParams(location.search).get("variant");if(keys.indexOf(cur)<0)cur="A";
+function show(){var V=DOCS[cur];
+ document.getElementById("lab").textContent=cur+" ("+V.name+")";
+ document.getElementById("what").innerHTML="<b>"+cur+": "+V.name+"</b><table>"+AXES[cur].map(function(a){return "<tr><td>"+a[0]+"</td><td>"+a[1]+"</td></tr>"}).join("")+"</table>";
+ var R=document.getElementById("rows");R.innerHTML="";
+ V.rows.forEach(function(r){var d=document.createElement("div");d.className="row";
+  d.innerHTML="<h2>"+r.t+"</h2><div class='frames'><figure><iframe width=260 height=230></iframe><figcaption>260 &times; 230</figcaption></figure><figure><iframe width=460 height=380></iframe><figcaption>460 &times; 380</figcaption></figure></div><div class='notes'>"+r.n+"</div>";
+  R.appendChild(d);d.querySelectorAll("iframe").forEach(function(f){f.srcdoc=r.d})});
+ history.replaceState(null,"","?variant="+cur)}
+function step(d){cur=keys[(keys.indexOf(cur)+d+keys.length)%keys.length];show()}
+document.getElementById("prev").onclick=function(){step(-1)};document.getElementById("next").onclick=function(){step(1)};
+addEventListener("keydown",function(e){var t=e.target;if(t.closest&&t.closest("input,textarea,[contenteditable]"))return;if(e.key==="ArrowLeft")step(-1);if(e.key==="ArrowRight")step(1)});
+show();
+</script></body></html>
