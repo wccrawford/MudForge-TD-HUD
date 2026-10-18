@@ -380,4 +380,21 @@ s = map.new()
 map.map(s, fixture("plane_mereroad"))
 eq(map.html(s), map.html(s), "stable")
 
+-- ===== Rooms, names and Wards fixtures (wayfinder #29) =====
+
+-- Every plane with the new keys, captured or synthetic, is taken and drawn
+for _, name in ipairs({ "plane_gildhythe_named", "plane_greenroad_named", "plane_tallyglass_named",
+  "plane_glassfall_named", "plane_ochrefringe_named", "plane_ringingrows_named",
+  "plane_synthetic_town_rooms", "plane_synthetic_ward_wilds", "plane_synthetic_delve_rooms" }) do
+  s = map.new()
+  map.map(s, fixture(name))
+  has(map.html(s), "<svg", name .. " draws")
+end
+
+-- The named Depth grows room by room and descends
+s = map.new()
+replay(s, "seq_delve_names")
+eq(s.area, "the Lees, Depth 2", "descended")
+eq(s.here, "d10", "placed on Depth 2")
+
 print("map_test: OK")

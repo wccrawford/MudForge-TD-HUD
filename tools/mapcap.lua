@@ -2,7 +2,7 @@
 -- TextDungeon GMCP package and each prose line, in arrival order, and saves
 -- the log with saveTable; `node tools/mapcap-read.js OUT.json` pulls it back
 -- out of MudForge (it is not in plugin_tables.db). Import it once in the
--- Plugin Manager; it keeps the last 3000 entries.
+-- Plugin Manager; it keeps the last 10000 entries.
 --   mapcap mark <label>   tag the log (e.g. "town", "delve grown")
 --   mapcap clear          drop everything logged so far
 --   mapcap                show how much is logged
@@ -19,7 +19,7 @@ local PKGS = {
   "Char.Effects", "Char.Items", "Char.Group", "Quest.Show", "Writing.Read",
   "Page.Refused", "Client.Package",
 }
-local MAX = 3000
+local MAX = 10000
 
 local log = {}
 local seq = 0
