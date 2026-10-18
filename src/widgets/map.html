@@ -1,10 +1,11 @@
-<!-- Map window: styles only. Its content is this followed by lib/map.lua's
-     html(), rewritten whole on every change (wayfinder #21, as ADR 0002).
-     Look A, "Tiles" (#23): the plane is an SVG whose viewBox frames the
-     whole Plane and scales to the space left over (Fit, #22); the header,
-     the Ward legend, the level bar (#24), the holds and the No-plane reason
-     are HTML in the widget's own font. Rooms and Wards are look D, "Floor
-     and dots" (#31). The SVG carries its own colours. -->
+<!-- Map window: styles and the page script. Its content is this followed by
+     lib/map.lua's html(), rewritten whole on every change (wayfinder #21,
+     #35, as ADR 0002). Look A, "Tiles" (#23): the plane is an SVG drawn at
+     the zoom, laid out in a clipped viewport by the page script below
+     (Following, #30, #36); the header, the Ward legend, the footer's zoom
+     and level controls (#24, #31), the holds and the No-plane reason are
+     HTML in the widget's own font. Rooms and Wards are look D, "Floor and
+     dots" (#31). The SVG carries its own colours. -->
 <style>
   html,body{height:100%}
   .mapwin{display:flex;flex-direction:column;height:100%;min-height:0;gap:4px;padding:2px}
@@ -23,22 +24,28 @@
   .lgw{white-space:nowrap}
   .lgw i{display:inline-block;width:.75em;height:.75em;border-radius:2px;margin-right:.3em;vertical-align:-.05em;border:1.5px solid transparent}
   .lgw.hollow{font-style:italic}
-  .mbody{flex:1;min-height:0;display:flex}
-  .plane{width:100%;height:100%;display:block;margin:auto}
+  /* the viewport: the plane at the zoom, placed by the page script; the browser's own drag of the SVG blocked (#35) */
+  .mvp{flex:1;min-height:0;position:relative;overflow:hidden;cursor:grab;touch-action:none}
+  .mvp.drag{cursor:grabbing}
+  .mvp .plane{position:absolute;left:0;top:0;display:block;user-select:none;-webkit-user-drag:none}
+  /* a member out of view: a coral initial pinned to the edge, pointing toward them */
+  .mpips{position:absolute;left:0;top:0;right:0;bottom:0;pointer-events:none}
+  .pip{position:absolute;width:1.3em;height:1.3em;margin:-.65em 0 0 -.65em;border-radius:50%;background:#ff7b72;color:#0d1117;font-weight:700;font-size:.8em;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 1.5px #0d1117;pointer-events:auto;cursor:default}
+  .pip::after{content:"";position:absolute;width:0;height:0;border:4px solid transparent;left:50%;top:50%;margin:-4px;transform:rotate(var(--a)) translateX(10px);border-left:5px solid #ff7b72}
   .mreason{margin:auto;padding:1em;text-align:center;color:#8b949e;max-width:22em}
   .mreason code{color:#c9d1d9}
   .mnone{margin:auto;color:#6e7681}
   .mholds{border-top:1px solid #30363d;padding-top:3px;font-size:.88em;color:#8b949e;flex-shrink:0}
   .mholds b{color:#c9d1d9;font-weight:600}
-  /* the level bar: ▼ Level n of m ▲, whoever is elsewhere by the arrow toward them */
+  /* the footer: − + ◎ on the left, the level control (▼ Level n of m ▲, whoever is elsewhere by the arrow toward them) on the right */
   /* the right padding keeps ▲ clear of MudForge's resize grip in the window's corner */
-  .mlevel{display:flex;align-items:center;border-top:1px solid #30363d;padding:3px 34px 0 0;font-size:.92em;color:#8b949e;flex-shrink:0}
-  .lvend{flex:1;display:flex;align-items:center;gap:3px;min-width:0}
-  .lvr{justify-content:flex-end}
-  .lvmid{flex:none;padding:0 .5em;white-space:nowrap}
+  .mfoot{display:flex;align-items:center;gap:.5em;border-top:1px solid #30363d;padding:3px 34px 0 0;font-size:.92em;color:#8b949e;flex-shrink:0}
+  .zctl{display:flex;gap:3px;flex:none}
+  .zb,.lvarrow{flex:none;cursor:pointer;user-select:none;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:3px;line-height:1.2;padding:0 6px;text-align:center;min-width:1.6em}
+  .zb:hover,.lvarrow:hover{border-color:#8b949e;color:#fff}
+  .mlevel{display:flex;align-items:center;gap:3px;margin-left:auto;min-width:0}
+  .lvmid{flex:none;padding:0 .4em;white-space:nowrap}
   .lvmid.browsing{color:#39c5cf}
-  .lvarrow{flex:none;cursor:pointer;user-select:none;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:3px;line-height:1.2;padding:0 6px}
-  .lvarrow:hover{border-color:#8b949e;color:#fff}
   .lvarrow.off{opacity:.3;cursor:default}
   .lvarrow.off:hover{border-color:#30363d;color:#c9d1d9}
   .lvmem{display:inline-flex;align-items:center;justify-content:center;width:1.25em;height:1.25em;border-radius:50%;background:#ff7b72;color:#0d1117;font-weight:700;font-size:.82em;cursor:pointer;flex:none}
@@ -46,3 +53,112 @@
   .lvyou::after{content:"";position:absolute;left:50%;top:50%;width:3px;height:3px;margin:-1.5px;border-radius:50%;background:#ffd33d}
   .lvmem:hover,.lvyou:hover{outline:1px solid #fff}
 </style>
+<script>
+// Following, zoom and panning (wayfinder #35, #36). lib/map.lua ends its
+// content with mapView(V): V is the view Lua holds (zoom, pan from the
+// player in plane units, a drag in progress), the viewBox, the point to
+// centre and the members on the level shown. This lays the plane out from
+// it, runs drag, wheel, zoom and centre-on-me, pins members out of view to
+// the edge, and reports the view to Lua - always an object, never an array.
+function mapView(V) {
+  var vp = document.getElementById('mvp'), pl = document.getElementById('mplane'), pips = document.getElementById('mpips');
+  if (!vp || !pl) return;
+  var pan = { x: V.px, y: V.py }, drag = null, last = 0, U = 20;
+  function k() { return V.zoom / U; }
+  // one axis: centred when the plane fits, else the point centred and stopped at the plane's edges
+  function axis(view, origin, len, at) {
+    var size = len * k();
+    if (size <= view) return (view - size) / 2;
+    return Math.min(0, Math.max(view - size, view / 2 - (at - origin) * k()));
+  }
+  // the pan kept inside what the layout allows, so a drag has no dead zone;
+  // only a drag clamps it, so a pan of 0 (Following) stays 0
+  function keep(p, at, view, origin, len) {
+    if (len * k() <= view) return 0;
+    var lo = origin + view / 2 / k(), hi = origin + len - view / 2 / k();
+    return Math.min(hi, Math.max(lo, at + p)) - at;
+  }
+  function clamp() {
+    pan.x = keep(pan.x, V.at.x, vp.clientWidth, V.vb.x, V.vb.w);
+    pan.y = keep(pan.y, V.at.y, vp.clientHeight, V.vb.y, V.vb.h);
+  }
+  function pip(m, x, y, W, H) {
+    var M = 12, cx = W / 2, cy = H / 2, dx = x - cx, dy = y - cy;
+    var f = Math.min((W / 2 - M) / Math.abs(dx || 1e-9), (H / 2 - M) / Math.abs(dy || 1e-9));
+    var p = document.createElement('span');
+    p.className = 'pip';
+    p.title = m.name + ' (out of view)';
+    p.textContent = m.i;
+    p.style.left = (cx + dx * f) + 'px';
+    p.style.top = (cy + dy * f) + 'px';
+    p.style.setProperty('--a', Math.atan2(dy, dx) + 'rad');
+    pips.appendChild(p);
+  }
+  function layout() {
+    var W = vp.clientWidth, H = vp.clientHeight;
+    pl.style.width = V.vb.w * k() + 'px';
+    pl.style.height = V.vb.h * k() + 'px';
+    var tx = Math.round(axis(W, V.vb.x, V.vb.w, V.at.x + pan.x)), ty = Math.round(axis(H, V.vb.y, V.vb.h, V.at.y + pan.y));
+    pl.style.transform = 'translate(' + tx + 'px,' + ty + 'px)';
+    pips.textContent = '';
+    V.members.forEach(function (m) {
+      var x = tx + (m.x - V.vb.x) * k(), y = ty + (m.y - V.vb.y) * k();
+      if (x < 12 || x > W - 12 || y < 12 || y > H - 12) pip(m, x, y, W, H);
+    });
+  }
+  function report() {
+    if (window.mudforge) mudforge.send('view', { px: pan.x, py: pan.y, zoom: V.zoom, dragging: !!drag });
+  }
+  function soon() {
+    var t = Date.now();
+    if (t - last > 60) { last = t; report(); }
+  }
+  function zoomBy(d) {
+    var i = V.zooms.indexOf(V.zoom) + d;
+    if (i < 0 || i >= V.zooms.length) return;
+    V.zoom = V.zooms[i];
+    layout(); report();
+  }
+  function begin(e) {
+    clamp();
+    drag = { x: e.clientX, y: e.clientY, p: { x: pan.x, y: pan.y } };
+    try { vp.setPointerCapture(e.pointerId); } catch (_) {}
+    vp.classList.add('drag');
+  }
+  function end() {
+    if (!drag) return;
+    drag = null;
+    V.dragging = false;
+    vp.classList.remove('drag');
+    report();
+  }
+  vp.addEventListener('dragstart', function (e) { e.preventDefault(); });
+  vp.addEventListener('pointerdown', function (e) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    begin(e);
+  });
+  vp.addEventListener('pointermove', function (e) {
+    if (!drag) {
+      // a rewrite mid-drag: pick the drag up again while the button is held
+      if (V.dragging) {
+        if (e.buttons & 1) begin(e);
+        else { V.dragging = false; report(); }
+      }
+      return;
+    }
+    pan = { x: drag.p.x - (e.clientX - drag.x) / k(), y: drag.p.y - (e.clientY - drag.y) / k() };
+    clamp(); layout(); soon();
+  });
+  vp.addEventListener('pointerup', end);
+  vp.addEventListener('pointercancel', end);
+  vp.addEventListener('lostpointercapture', end);
+  addEventListener('pointerup', function () { if (V.dragging && !drag) { V.dragging = false; report(); } });
+  vp.addEventListener('wheel', function (e) { e.preventDefault(); zoomBy(e.deltaY < 0 ? 1 : -1); }, { passive: false });
+  document.getElementById('mzout').onclick = function () { zoomBy(-1); };
+  document.getElementById('mzin').onclick = function () { zoomBy(1); };
+  document.getElementById('mme').onclick = function () { pan = { x: 0, y: 0 }; layout(); report(); };
+  addEventListener('resize', layout);
+  layout();
+}
+</script>

@@ -28,17 +28,21 @@ function M.copy(lines)
   return out
 end
 
--- One UTF-8 sequence (a lead byte and its continuation bytes) as a numeric
--- entity; anything malformed is U+FFFD.
-local function entity(seq)
+-- One UTF-8 sequence (a lead byte and its continuation bytes) as its code
+-- point; anything malformed is U+FFFD.
+local function codepoint(seq)
   local b, len, cp = seq:byte(1), #seq, nil
   if b >= 194 and b <= 223 and len == 2 then cp = b - 192
   elseif b >= 224 and b <= 239 and len == 3 then cp = b - 224
   elseif b >= 240 and b <= 244 and len == 4 then cp = b - 240 end
-  if cp == nil then return "&#65533;" end
+  if cp == nil then return 65533 end
   for i = 2, len do cp = cp * 64 + seq:byte(i) - 128 end
-  if cp < 128 or cp > 1114111 then return "&#65533;" end
-  return "&#" .. cp .. ";"
+  if cp < 128 or cp > 1114111 then return 65533 end
+  return cp
+end
+
+local function entity(seq)
+  return "&#" .. codepoint(seq) .. ";"
 end
 
 -- Fed text for markup. Non-ASCII leaves as numeric entities: MudForge hands
@@ -52,6 +56,26 @@ function M.escape(s)
   s = (s:gsub('"', "&quot;"))
   s = (s:gsub("[\128-\255][\128-\191]*", entity))
   return s
+end
+
+local function u(cp)
+  return string.format("\\u%04x", cp)
+end
+
+-- Fed text as a JSON string literal for a page script, under the same rule:
+-- non-ASCII leaves as \u escapes (a surrogate pair past U+FFFF), and so do
+-- "<" (no "</script>" in a name ends the script) and control characters.
+function M.jstr(s)
+  s = tostring(s or "")
+  s = (s:gsub('[\\"]', "\\%0"))
+  s = (s:gsub("[%z\1-\31<]", function(c) return u(c:byte()) end))
+  s = (s:gsub("[\128-\255][\128-\191]*", function(seq)
+    local cp = codepoint(seq)
+    if cp < 65536 then return u(cp) end
+    cp = cp - 65536
+    return u(55296 + math.floor(cp / 1024)) .. u(56320 + cp % 1024)
+  end))
+  return '"' .. s .. '"'
 end
 
 -- A widget's own font, as getWidgetFont answers it (`{family, size, weight}`,

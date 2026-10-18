@@ -6,14 +6,30 @@
 -- Pure Lua 5.1 library, same shape as pages.lua (new / feed / sever, act()
 -- for the widget's clicks, html() for its whole content, ADR 0002). The
 -- drawing is look A, "Tiles" (wayfinder #23), with Rooms and Wards in look
--- D, "Floor and dots" (#31), framed by Fit (#22), with the level bar under
--- the plane (#24). It draws only what the package says.
+-- D, "Floor and dots" (#31), at a fixed zoom that Follows the player (#30,
+-- #35), with the zoom and level controls in the footer (#24, #31). It draws
+-- only what the package says.
 local doc = require("doc")
 
 local M = {}
 
-function M.new()
-  return { state = "unfed", members = {} }
+-- The zoom steps, in px a cell; 34 unless the player picked another.
+M.ZOOMS = { 20, 24, 28, 34, 40, 48, 56 }
+local ZOOM = 34
+
+local function zoomStep(z)
+  z = tonumber(z)
+  for _, v in ipairs(M.ZOOMS) do
+    if v == z then return z end
+  end
+  return nil
+end
+
+-- `zoom` is the remembered one, if any (the plugin keeps it across
+-- sessions). The view - zoom, pan, a drag in progress - is the page's to
+-- change and Lua's to hold, so every rewrite is laid out from it (#35).
+function M.new(zoom)
+  return { state = "unfed", members = {}, zoom = zoomStep(zoom) or ZOOM, pan = { x = 0, y = 0 }, dragging = false }
 end
 
 -- Any Feed snapshot on this connection: a window with no Area.Map yet can
@@ -108,7 +124,10 @@ end
 -- Moves the markers to a position whose Cell is on the Plane. A new `here`
 -- ends Browsing; a member moving does not.
 local function place(s, here, members)
-  if here ~= s.here then s.browse = nil end
+  if here ~= s.here then
+    s.browse = nil
+    s.pan = { x = 0, y = 0 }
+  end
   s.here = here
   s.members = group(s.cells, members)
   s.off = false
@@ -145,6 +164,7 @@ function M.map(s, pkg)
     s.here = nil
     s.members = {}
     s.browse = nil
+    s.pan = { x = 0, y = 0 }
     s.off = false
   end
   if s.held ~= nil and cells[s.held.here] ~= nil then
@@ -171,6 +191,24 @@ function M.where(s, pkg)
     s.held = { here = here, members = pkg.members }
   end
   return s
+end
+
+-- The page's `view` report, an object (an array reaches Lua 0-based):
+-- {px, py} the pan from the player in plane units, `zoom` a step, and
+-- `dragging`. A part that is missing or not usable is left as it was.
+function M.view(s, d)
+  if type(d) ~= "table" then return s end
+  local x, y = tonumber(d.px), tonumber(d.py)
+  if x ~= nil then s.pan.x = x end
+  if y ~= nil then s.pan.y = y end
+  s.zoom = zoomStep(d.zoom) or s.zoom
+  s.dragging = d.dragging == true
+  return s
+end
+
+-- Panned: the view moved away from the player.
+function M.panned(s)
+  return s.pan.x ~= 0 or s.pan.y ~= 0
 end
 
 -- Connection lost: the Plane and the markers stay, frozen.
@@ -273,12 +311,11 @@ end
 
 -- ===== Drawing: look A, "Tiles", with look D's Rooms and Wards =====
 
-local U = 20      -- one cell in SVG units; Fit scales the viewBox, so this is only proportion
+local U = 20      -- one cell in SVG units; drawn at the zoom, in px a cell
 local T = 12      -- a tile
 local HT = T / 2
 local EDGE = 2.6
 local PAD = 18    -- room around the Plane's bounds for stubs and marks
-local CAP = 34    -- the largest a cell is drawn, in px
 
 local DIRS = {
   north = { 0, 1 }, south = { 0, -1 }, east = { 1, 0 }, west = { -1, 0 },
@@ -578,9 +615,9 @@ local function wardShading(s, sc)
   return table.concat(out)
 end
 
--- The plane as SVG: the whole Plane's x/y bounds framed by the viewBox, so
--- the frame holds still while Browsing, grown to hold every label; the cell
--- size capped by max sizes.
+-- The plane as SVG at the zoom, and its viewBox {x, y, w, h}: the whole
+-- Plane's x/y bounds, so the frame holds still while Browsing, grown to
+-- hold every label. The page script lays it out in the viewport.
 local function svg(s, sc)
   local x0, x1, y0, y1 = math.huge, -math.huge, math.huge, -math.huge
   for _, r in pairs(s.cells) do
@@ -799,9 +836,34 @@ local function svg(s, sc)
     fx0, fy0, fx1, fy1 = math.min(fx0, b[1] - 3), math.min(fy0, b[2] - 3), math.max(fx1, b[3] + 3), math.max(fy1, b[4] + 3)
   end
   local w, h = fx1 - fx0, fy1 - fy0
-  return '<svg class="plane" viewBox="' .. n(fx0) .. " " .. n(fy0) .. " " .. n(w) .. " " .. n(h)
-    .. '" preserveAspectRatio="xMidYMid meet" style="max-width:' .. n(w / U * CAP) .. "px;max-height:" .. n(h / U * CAP) .. 'px">'
-    .. DEFS .. table.concat(g) .. "</svg>"
+  return '<svg class="plane" id="mplane" viewBox="' .. n(fx0) .. " " .. n(fy0) .. " " .. n(w) .. " " .. n(h)
+    .. '" width="' .. n(w / U * s.zoom) .. '" height="' .. n(h / U * s.zoom) .. '">'
+    .. DEFS .. table.concat(g) .. "</svg>", { x = fx0, y = fy0, w = w, h = h }
+end
+
+-- The view for the page script (#35), as a call it makes: the zoom and its
+-- steps, the pan and a drag in progress, the viewBox, the point it centres
+-- (your Cell, kept while Browsing; the middle of the Plane before you are
+-- on it), and the members on the level shown, for the edge pips. Fed text
+-- goes through doc.jstr; arrays are only ever script source here, never
+-- sent across.
+local function view(s, sc, vb)
+  local function pt(x, y) return '{"x":' .. n(x) .. ',"y":' .. n(y) .. "}" end
+  local you = s.here ~= nil and s.cells[s.here] or nil
+  local at = you ~= nil and pt(px(you), py(you)) or pt(vb.x + vb.w / 2, vb.y + vb.h / 2)
+  local zs, ms = {}, {}
+  for i, z in ipairs(M.ZOOMS) do zs[i] = n(z) end
+  for _, id in ipairs(sortedKeys(s.members)) do
+    local r = s.cells[id]
+    if r.z == sc.z then
+      for _, name in ipairs(s.members[id]) do
+        ms[#ms + 1] = '{"x":' .. n(px(r)) .. ',"y":' .. n(py(r)) .. ',"i":' .. doc.jstr(initial(name)) .. ',"name":' .. doc.jstr(name) .. "}"
+      end
+    end
+  end
+  return '<script>mapView({"zoom":' .. n(s.zoom) .. ',"zooms":[' .. table.concat(zs, ",") .. '],"px":' .. n(s.pan.x) .. ',"py":' .. n(s.pan.y)
+    .. ',"dragging":' .. tostring(s.dragging) .. ',"vb":{"x":' .. n(vb.x) .. ',"y":' .. n(vb.y) .. ',"w":' .. n(vb.w) .. ',"h":' .. n(vb.h)
+    .. '},"at":' .. at .. ',"members":[' .. table.concat(ms, ",") .. "]})</script>"
 end
 
 local SEP = '<span class="msep">&#183;</span>'
@@ -845,9 +907,14 @@ local function legend(s)
   return '<div class="mlegend">' .. table.concat(out) .. "</div>"
 end
 
--- The level bar: ▼ Level n of m ▲, with whoever is on another level by the
--- arrow that leads to them (you too, while Browsing). None on a 1-level Plane.
-local function levelBar(s, z)
+-- The zoom controls, which the page script runs: out, in, centre on me.
+local ZOOMCTL = '<span class="zctl"><span class="zb" id="mzout" title="Zoom out">&#8722;</span>'
+  .. '<span class="zb" id="mzin" title="Zoom in">+</span><span class="zb" id="mme" title="Centre on me">&#9678;</span></span>'
+
+-- The level control: ▼ Level n of m ▲, with whoever is on another level by
+-- the arrow that leads to them (you too, while Browsing). None on a 1-level
+-- Plane.
+local function levelCtl(s, z)
   local zs = levels(s.cells)
   if #zs < 2 then return "" end
   local at = 1
@@ -874,10 +941,10 @@ local function levelBar(s, z)
       end
     end
   end
-  return '<div class="mlevel"><span class="lvend">' .. arrow("&#9660;", "Level below", zs[at - 1] and ("z" .. n(zs[at - 1])))
-    .. table.concat(who.down) .. "</span>"
+  return '<span class="mlevel">' .. arrow("&#9660;", "Level below", zs[at - 1] and ("z" .. n(zs[at - 1])))
+    .. table.concat(who.down)
     .. '<span class="lvmid' .. (s.browse ~= nil and " browsing" or "") .. '">Level ' .. at .. " of " .. #zs .. "</span>"
-    .. '<span class="lvend lvr">' .. table.concat(who.up) .. arrow("&#9650;", "Level above", zs[at + 1] and ("z" .. n(zs[at + 1]))) .. "</span></div>"
+    .. table.concat(who.up) .. arrow("&#9650;", "Level above", zs[at + 1] and ("z" .. n(zs[at + 1]))) .. "</span>"
 end
 
 local function holds(s)
@@ -899,10 +966,11 @@ local function reason(text)
 end
 
 -- The widget's whole content, in `font` (the widget's own, see doc.fontStyle).
--- A No-plane reason is shown only while Live.
+-- A No-plane reason is shown only while Live. A drawn Plane ends with the
+-- view for the page script, which runs once the window is there.
 function M.html(s, font)
   local live = s.state == "live"
-  local body
+  local body, script = nil, ""
   if s.state == "unfed" or s.cells == nil then
     body = live and reason("No map from the server yet. If <code>config map</code> is off, <code>config map on</code> brings it back.")
       or '<div class="mnone">Map</div>'
@@ -912,9 +980,12 @@ function M.html(s, font)
     body = head(s) .. (live and reason(doc.escape(s.area) .. " has no map.") or "")
   else
     local sc = scene(s)
-    body = head(s) .. '<div class="mbody">' .. svg(s, sc) .. "</div>" .. legend(s) .. levelBar(s, sc.z) .. holds(s)
+    local plane, vb = svg(s, sc)
+    body = head(s) .. '<div class="mvp" id="mvp">' .. plane .. '<div class="mpips" id="mpips"></div></div>' .. legend(s)
+      .. '<div class="mfoot">' .. ZOOMCTL .. levelCtl(s, sc.z) .. "</div>" .. holds(s)
+    script = view(s, sc, vb)
   end
-  return '<div class="hud mapwin" data-state="' .. s.state .. '"' .. doc.fontStyle(font) .. ">" .. body .. "</div>"
+  return '<div class="hud mapwin" data-state="' .. s.state .. '"' .. doc.fontStyle(font) .. ">" .. body .. "</div>" .. script
 end
 
 return M

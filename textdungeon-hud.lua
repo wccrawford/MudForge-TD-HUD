@@ -531,17 +531,21 @@ function M.copy(lines)
   return out
 end
 
--- One UTF-8 sequence (a lead byte and its continuation bytes) as a numeric
--- entity; anything malformed is U+FFFD.
-local function entity(seq)
+-- One UTF-8 sequence (a lead byte and its continuation bytes) as its code
+-- point; anything malformed is U+FFFD.
+local function codepoint(seq)
   local b, len, cp = seq:byte(1), #seq, nil
   if b >= 194 and b <= 223 and len == 2 then cp = b - 192
   elseif b >= 224 and b <= 239 and len == 3 then cp = b - 224
   elseif b >= 240 and b <= 244 and len == 4 then cp = b - 240 end
-  if cp == nil then return "&#65533;" end
+  if cp == nil then return 65533 end
   for i = 2, len do cp = cp * 64 + seq:byte(i) - 128 end
-  if cp < 128 or cp > 1114111 then return "&#65533;" end
-  return "&#" .. cp .. ";"
+  if cp < 128 or cp > 1114111 then return 65533 end
+  return cp
+end
+
+local function entity(seq)
+  return "&#" .. codepoint(seq) .. ";"
 end
 
 -- Fed text for markup. Non-ASCII leaves as numeric entities: MudForge hands
@@ -555,6 +559,26 @@ function M.escape(s)
   s = (s:gsub('"', "&quot;"))
   s = (s:gsub("[\128-\255][\128-\191]*", entity))
   return s
+end
+
+local function u(cp)
+  return string.format("\\u%04x", cp)
+end
+
+-- Fed text as a JSON string literal for a page script, under the same rule:
+-- non-ASCII leaves as \u escapes (a surrogate pair past U+FFFF), and so do
+-- "<" (no "</script>" in a name ends the script) and control characters.
+function M.jstr(s)
+  s = tostring(s or "")
+  s = (s:gsub('[\\"]', "\\%0"))
+  s = (s:gsub("[%z\1-\31<]", function(c) return u(c:byte()) end))
+  s = (s:gsub("[\128-\255][\128-\191]*", function(seq)
+    local cp = codepoint(seq)
+    if cp < 65536 then return u(cp) end
+    cp = cp - 65536
+    return u(55296 + math.floor(cp / 1024)) .. u(56320 + cp % 1024)
+  end))
+  return '"' .. s .. '"'
 end
 
 -- A widget's own font, as getWidgetFont answers it (`{family, size, weight}`,
@@ -995,14 +1019,30 @@ __libs["map"] = (function()
 -- Pure Lua 5.1 library, same shape as pages.lua (new / feed / sever, act()
 -- for the widget's clicks, html() for its whole content, ADR 0002). The
 -- drawing is look A, "Tiles" (wayfinder #23), with Rooms and Wards in look
--- D, "Floor and dots" (#31), framed by Fit (#22), with the level bar under
--- the plane (#24). It draws only what the package says.
+-- D, "Floor and dots" (#31), at a fixed zoom that Follows the player (#30,
+-- #35), with the zoom and level controls in the footer (#24, #31). It draws
+-- only what the package says.
 local doc = require("doc")
 
 local M = {}
 
-function M.new()
-  return { state = "unfed", members = {} }
+-- The zoom steps, in px a cell; 34 unless the player picked another.
+M.ZOOMS = { 20, 24, 28, 34, 40, 48, 56 }
+local ZOOM = 34
+
+local function zoomStep(z)
+  z = tonumber(z)
+  for _, v in ipairs(M.ZOOMS) do
+    if v == z then return z end
+  end
+  return nil
+end
+
+-- `zoom` is the remembered one, if any (the plugin keeps it across
+-- sessions). The view - zoom, pan, a drag in progress - is the page's to
+-- change and Lua's to hold, so every rewrite is laid out from it (#35).
+function M.new(zoom)
+  return { state = "unfed", members = {}, zoom = zoomStep(zoom) or ZOOM, pan = { x = 0, y = 0 }, dragging = false }
 end
 
 -- Any Feed snapshot on this connection: a window with no Area.Map yet can
@@ -1097,7 +1137,10 @@ end
 -- Moves the markers to a position whose Cell is on the Plane. A new `here`
 -- ends Browsing; a member moving does not.
 local function place(s, here, members)
-  if here ~= s.here then s.browse = nil end
+  if here ~= s.here then
+    s.browse = nil
+    s.pan = { x = 0, y = 0 }
+  end
   s.here = here
   s.members = group(s.cells, members)
   s.off = false
@@ -1134,6 +1177,7 @@ function M.map(s, pkg)
     s.here = nil
     s.members = {}
     s.browse = nil
+    s.pan = { x = 0, y = 0 }
     s.off = false
   end
   if s.held ~= nil and cells[s.held.here] ~= nil then
@@ -1160,6 +1204,24 @@ function M.where(s, pkg)
     s.held = { here = here, members = pkg.members }
   end
   return s
+end
+
+-- The page's `view` report, an object (an array reaches Lua 0-based):
+-- {px, py} the pan from the player in plane units, `zoom` a step, and
+-- `dragging`. A part that is missing or not usable is left as it was.
+function M.view(s, d)
+  if type(d) ~= "table" then return s end
+  local x, y = tonumber(d.px), tonumber(d.py)
+  if x ~= nil then s.pan.x = x end
+  if y ~= nil then s.pan.y = y end
+  s.zoom = zoomStep(d.zoom) or s.zoom
+  s.dragging = d.dragging == true
+  return s
+end
+
+-- Panned: the view moved away from the player.
+function M.panned(s)
+  return s.pan.x ~= 0 or s.pan.y ~= 0
 end
 
 -- Connection lost: the Plane and the markers stay, frozen.
@@ -1262,12 +1324,11 @@ end
 
 -- ===== Drawing: look A, "Tiles", with look D's Rooms and Wards =====
 
-local U = 20      -- one cell in SVG units; Fit scales the viewBox, so this is only proportion
+local U = 20      -- one cell in SVG units; drawn at the zoom, in px a cell
 local T = 12      -- a tile
 local HT = T / 2
 local EDGE = 2.6
 local PAD = 18    -- room around the Plane's bounds for stubs and marks
-local CAP = 34    -- the largest a cell is drawn, in px
 
 local DIRS = {
   north = { 0, 1 }, south = { 0, -1 }, east = { 1, 0 }, west = { -1, 0 },
@@ -1567,9 +1628,9 @@ local function wardShading(s, sc)
   return table.concat(out)
 end
 
--- The plane as SVG: the whole Plane's x/y bounds framed by the viewBox, so
--- the frame holds still while Browsing, grown to hold every label; the cell
--- size capped by max sizes.
+-- The plane as SVG at the zoom, and its viewBox {x, y, w, h}: the whole
+-- Plane's x/y bounds, so the frame holds still while Browsing, grown to
+-- hold every label. The page script lays it out in the viewport.
 local function svg(s, sc)
   local x0, x1, y0, y1 = math.huge, -math.huge, math.huge, -math.huge
   for _, r in pairs(s.cells) do
@@ -1788,9 +1849,34 @@ local function svg(s, sc)
     fx0, fy0, fx1, fy1 = math.min(fx0, b[1] - 3), math.min(fy0, b[2] - 3), math.max(fx1, b[3] + 3), math.max(fy1, b[4] + 3)
   end
   local w, h = fx1 - fx0, fy1 - fy0
-  return '<svg class="plane" viewBox="' .. n(fx0) .. " " .. n(fy0) .. " " .. n(w) .. " " .. n(h)
-    .. '" preserveAspectRatio="xMidYMid meet" style="max-width:' .. n(w / U * CAP) .. "px;max-height:" .. n(h / U * CAP) .. 'px">'
-    .. DEFS .. table.concat(g) .. "</svg>"
+  return '<svg class="plane" id="mplane" viewBox="' .. n(fx0) .. " " .. n(fy0) .. " " .. n(w) .. " " .. n(h)
+    .. '" width="' .. n(w / U * s.zoom) .. '" height="' .. n(h / U * s.zoom) .. '">'
+    .. DEFS .. table.concat(g) .. "</svg>", { x = fx0, y = fy0, w = w, h = h }
+end
+
+-- The view for the page script (#35), as a call it makes: the zoom and its
+-- steps, the pan and a drag in progress, the viewBox, the point it centres
+-- (your Cell, kept while Browsing; the middle of the Plane before you are
+-- on it), and the members on the level shown, for the edge pips. Fed text
+-- goes through doc.jstr; arrays are only ever script source here, never
+-- sent across.
+local function view(s, sc, vb)
+  local function pt(x, y) return '{"x":' .. n(x) .. ',"y":' .. n(y) .. "}" end
+  local you = s.here ~= nil and s.cells[s.here] or nil
+  local at = you ~= nil and pt(px(you), py(you)) or pt(vb.x + vb.w / 2, vb.y + vb.h / 2)
+  local zs, ms = {}, {}
+  for i, z in ipairs(M.ZOOMS) do zs[i] = n(z) end
+  for _, id in ipairs(sortedKeys(s.members)) do
+    local r = s.cells[id]
+    if r.z == sc.z then
+      for _, name in ipairs(s.members[id]) do
+        ms[#ms + 1] = '{"x":' .. n(px(r)) .. ',"y":' .. n(py(r)) .. ',"i":' .. doc.jstr(initial(name)) .. ',"name":' .. doc.jstr(name) .. "}"
+      end
+    end
+  end
+  return '<script>mapView({"zoom":' .. n(s.zoom) .. ',"zooms":[' .. table.concat(zs, ",") .. '],"px":' .. n(s.pan.x) .. ',"py":' .. n(s.pan.y)
+    .. ',"dragging":' .. tostring(s.dragging) .. ',"vb":{"x":' .. n(vb.x) .. ',"y":' .. n(vb.y) .. ',"w":' .. n(vb.w) .. ',"h":' .. n(vb.h)
+    .. '},"at":' .. at .. ',"members":[' .. table.concat(ms, ",") .. "]})</script>"
 end
 
 local SEP = '<span class="msep">&#183;</span>'
@@ -1834,9 +1920,14 @@ local function legend(s)
   return '<div class="mlegend">' .. table.concat(out) .. "</div>"
 end
 
--- The level bar: ▼ Level n of m ▲, with whoever is on another level by the
--- arrow that leads to them (you too, while Browsing). None on a 1-level Plane.
-local function levelBar(s, z)
+-- The zoom controls, which the page script runs: out, in, centre on me.
+local ZOOMCTL = '<span class="zctl"><span class="zb" id="mzout" title="Zoom out">&#8722;</span>'
+  .. '<span class="zb" id="mzin" title="Zoom in">+</span><span class="zb" id="mme" title="Centre on me">&#9678;</span></span>'
+
+-- The level control: ▼ Level n of m ▲, with whoever is on another level by
+-- the arrow that leads to them (you too, while Browsing). None on a 1-level
+-- Plane.
+local function levelCtl(s, z)
   local zs = levels(s.cells)
   if #zs < 2 then return "" end
   local at = 1
@@ -1863,10 +1954,10 @@ local function levelBar(s, z)
       end
     end
   end
-  return '<div class="mlevel"><span class="lvend">' .. arrow("&#9660;", "Level below", zs[at - 1] and ("z" .. n(zs[at - 1])))
-    .. table.concat(who.down) .. "</span>"
+  return '<span class="mlevel">' .. arrow("&#9660;", "Level below", zs[at - 1] and ("z" .. n(zs[at - 1])))
+    .. table.concat(who.down)
     .. '<span class="lvmid' .. (s.browse ~= nil and " browsing" or "") .. '">Level ' .. at .. " of " .. #zs .. "</span>"
-    .. '<span class="lvend lvr">' .. table.concat(who.up) .. arrow("&#9650;", "Level above", zs[at + 1] and ("z" .. n(zs[at + 1]))) .. "</span></div>"
+    .. table.concat(who.up) .. arrow("&#9650;", "Level above", zs[at + 1] and ("z" .. n(zs[at + 1]))) .. "</span>"
 end
 
 local function holds(s)
@@ -1888,10 +1979,11 @@ local function reason(text)
 end
 
 -- The widget's whole content, in `font` (the widget's own, see doc.fontStyle).
--- A No-plane reason is shown only while Live.
+-- A No-plane reason is shown only while Live. A drawn Plane ends with the
+-- view for the page script, which runs once the window is there.
 function M.html(s, font)
   local live = s.state == "live"
-  local body
+  local body, script = nil, ""
   if s.state == "unfed" or s.cells == nil then
     body = live and reason("No map from the server yet. If <code>config map</code> is off, <code>config map on</code> brings it back.")
       or '<div class="mnone">Map</div>'
@@ -1901,9 +1993,12 @@ function M.html(s, font)
     body = head(s) .. (live and reason(doc.escape(s.area) .. " has no map.") or "")
   else
     local sc = scene(s)
-    body = head(s) .. '<div class="mbody">' .. svg(s, sc) .. "</div>" .. legend(s) .. levelBar(s, sc.z) .. holds(s)
+    local plane, vb = svg(s, sc)
+    body = head(s) .. '<div class="mvp" id="mvp">' .. plane .. '<div class="mpips" id="mpips"></div></div>' .. legend(s)
+      .. '<div class="mfoot">' .. ZOOMCTL .. levelCtl(s, sc.z) .. "</div>" .. holds(s)
+    script = view(s, sc, vb)
   end
-  return '<div class="hud mapwin" data-state="' .. s.state .. '"' .. doc.fontStyle(font) .. ">" .. body .. "</div>"
+  return '<div class="hud mapwin" data-state="' .. s.state .. '"' .. doc.fontStyle(font) .. ">" .. body .. "</div>" .. script
 end
 
 return M
@@ -2202,13 +2297,14 @@ html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25
 /* Countdown urgency (Effects): 0 normal, 1 under 5 s */
 [data-urg="0"]{--u:#58a6ff}[data-urg="1"]{--u:#e5232b}
 </style>
-<!-- Map window: styles only. Its content is this followed by lib/map.lua's
-     html(), rewritten whole on every change (wayfinder #21, as ADR 0002).
-     Look A, "Tiles" (#23): the plane is an SVG whose viewBox frames the
-     whole Plane and scales to the space left over (Fit, #22); the header,
-     the Ward legend, the level bar (#24), the holds and the No-plane reason
-     are HTML in the widget's own font. Rooms and Wards are look D, "Floor
-     and dots" (#31). The SVG carries its own colours. -->
+<!-- Map window: styles and the page script. Its content is this followed by
+     lib/map.lua's html(), rewritten whole on every change (wayfinder #21,
+     #35, as ADR 0002). Look A, "Tiles" (#23): the plane is an SVG drawn at
+     the zoom, laid out in a clipped viewport by the page script below
+     (Following, #30, #36); the header, the Ward legend, the footer's zoom
+     and level controls (#24, #31), the holds and the No-plane reason are
+     HTML in the widget's own font. Rooms and Wards are look D, "Floor and
+     dots" (#31). The SVG carries its own colours. -->
 <style>
   html,body{height:100%}
   .mapwin{display:flex;flex-direction:column;height:100%;min-height:0;gap:4px;padding:2px}
@@ -2227,22 +2323,28 @@ html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25
   .lgw{white-space:nowrap}
   .lgw i{display:inline-block;width:.75em;height:.75em;border-radius:2px;margin-right:.3em;vertical-align:-.05em;border:1.5px solid transparent}
   .lgw.hollow{font-style:italic}
-  .mbody{flex:1;min-height:0;display:flex}
-  .plane{width:100%;height:100%;display:block;margin:auto}
+  /* the viewport: the plane at the zoom, placed by the page script; the browser's own drag of the SVG blocked (#35) */
+  .mvp{flex:1;min-height:0;position:relative;overflow:hidden;cursor:grab;touch-action:none}
+  .mvp.drag{cursor:grabbing}
+  .mvp .plane{position:absolute;left:0;top:0;display:block;user-select:none;-webkit-user-drag:none}
+  /* a member out of view: a coral initial pinned to the edge, pointing toward them */
+  .mpips{position:absolute;left:0;top:0;right:0;bottom:0;pointer-events:none}
+  .pip{position:absolute;width:1.3em;height:1.3em;margin:-.65em 0 0 -.65em;border-radius:50%;background:#ff7b72;color:#0d1117;font-weight:700;font-size:.8em;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 1.5px #0d1117;pointer-events:auto;cursor:default}
+  .pip::after{content:"";position:absolute;width:0;height:0;border:4px solid transparent;left:50%;top:50%;margin:-4px;transform:rotate(var(--a)) translateX(10px);border-left:5px solid #ff7b72}
   .mreason{margin:auto;padding:1em;text-align:center;color:#8b949e;max-width:22em}
   .mreason code{color:#c9d1d9}
   .mnone{margin:auto;color:#6e7681}
   .mholds{border-top:1px solid #30363d;padding-top:3px;font-size:.88em;color:#8b949e;flex-shrink:0}
   .mholds b{color:#c9d1d9;font-weight:600}
-  /* the level bar: ▼ Level n of m ▲, whoever is elsewhere by the arrow toward them */
+  /* the footer: − + ◎ on the left, the level control (▼ Level n of m ▲, whoever is elsewhere by the arrow toward them) on the right */
   /* the right padding keeps ▲ clear of MudForge's resize grip in the window's corner */
-  .mlevel{display:flex;align-items:center;border-top:1px solid #30363d;padding:3px 34px 0 0;font-size:.92em;color:#8b949e;flex-shrink:0}
-  .lvend{flex:1;display:flex;align-items:center;gap:3px;min-width:0}
-  .lvr{justify-content:flex-end}
-  .lvmid{flex:none;padding:0 .5em;white-space:nowrap}
+  .mfoot{display:flex;align-items:center;gap:.5em;border-top:1px solid #30363d;padding:3px 34px 0 0;font-size:.92em;color:#8b949e;flex-shrink:0}
+  .zctl{display:flex;gap:3px;flex:none}
+  .zb,.lvarrow{flex:none;cursor:pointer;user-select:none;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:3px;line-height:1.2;padding:0 6px;text-align:center;min-width:1.6em}
+  .zb:hover,.lvarrow:hover{border-color:#8b949e;color:#fff}
+  .mlevel{display:flex;align-items:center;gap:3px;margin-left:auto;min-width:0}
+  .lvmid{flex:none;padding:0 .4em;white-space:nowrap}
   .lvmid.browsing{color:#39c5cf}
-  .lvarrow{flex:none;cursor:pointer;user-select:none;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:3px;line-height:1.2;padding:0 6px}
-  .lvarrow:hover{border-color:#8b949e;color:#fff}
   .lvarrow.off{opacity:.3;cursor:default}
   .lvarrow.off:hover{border-color:#30363d;color:#c9d1d9}
   .lvmem{display:inline-flex;align-items:center;justify-content:center;width:1.25em;height:1.25em;border-radius:50%;background:#ff7b72;color:#0d1117;font-weight:700;font-size:.82em;cursor:pointer;flex:none}
@@ -2250,6 +2352,115 @@ html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25
   .lvyou::after{content:"";position:absolute;left:50%;top:50%;width:3px;height:3px;margin:-1.5px;border-radius:50%;background:#ffd33d}
   .lvmem:hover,.lvyou:hover{outline:1px solid #fff}
 </style>
+<script>
+// Following, zoom and panning (wayfinder #35, #36). lib/map.lua ends its
+// content with mapView(V): V is the view Lua holds (zoom, pan from the
+// player in plane units, a drag in progress), the viewBox, the point to
+// centre and the members on the level shown. This lays the plane out from
+// it, runs drag, wheel, zoom and centre-on-me, pins members out of view to
+// the edge, and reports the view to Lua - always an object, never an array.
+function mapView(V) {
+  var vp = document.getElementById('mvp'), pl = document.getElementById('mplane'), pips = document.getElementById('mpips');
+  if (!vp || !pl) return;
+  var pan = { x: V.px, y: V.py }, drag = null, last = 0, U = 20;
+  function k() { return V.zoom / U; }
+  // one axis: centred when the plane fits, else the point centred and stopped at the plane's edges
+  function axis(view, origin, len, at) {
+    var size = len * k();
+    if (size <= view) return (view - size) / 2;
+    return Math.min(0, Math.max(view - size, view / 2 - (at - origin) * k()));
+  }
+  // the pan kept inside what the layout allows, so a drag has no dead zone;
+  // only a drag clamps it, so a pan of 0 (Following) stays 0
+  function keep(p, at, view, origin, len) {
+    if (len * k() <= view) return 0;
+    var lo = origin + view / 2 / k(), hi = origin + len - view / 2 / k();
+    return Math.min(hi, Math.max(lo, at + p)) - at;
+  }
+  function clamp() {
+    pan.x = keep(pan.x, V.at.x, vp.clientWidth, V.vb.x, V.vb.w);
+    pan.y = keep(pan.y, V.at.y, vp.clientHeight, V.vb.y, V.vb.h);
+  }
+  function pip(m, x, y, W, H) {
+    var M = 12, cx = W / 2, cy = H / 2, dx = x - cx, dy = y - cy;
+    var f = Math.min((W / 2 - M) / Math.abs(dx || 1e-9), (H / 2 - M) / Math.abs(dy || 1e-9));
+    var p = document.createElement('span');
+    p.className = 'pip';
+    p.title = m.name + ' (out of view)';
+    p.textContent = m.i;
+    p.style.left = (cx + dx * f) + 'px';
+    p.style.top = (cy + dy * f) + 'px';
+    p.style.setProperty('--a', Math.atan2(dy, dx) + 'rad');
+    pips.appendChild(p);
+  }
+  function layout() {
+    var W = vp.clientWidth, H = vp.clientHeight;
+    pl.style.width = V.vb.w * k() + 'px';
+    pl.style.height = V.vb.h * k() + 'px';
+    var tx = Math.round(axis(W, V.vb.x, V.vb.w, V.at.x + pan.x)), ty = Math.round(axis(H, V.vb.y, V.vb.h, V.at.y + pan.y));
+    pl.style.transform = 'translate(' + tx + 'px,' + ty + 'px)';
+    pips.textContent = '';
+    V.members.forEach(function (m) {
+      var x = tx + (m.x - V.vb.x) * k(), y = ty + (m.y - V.vb.y) * k();
+      if (x < 12 || x > W - 12 || y < 12 || y > H - 12) pip(m, x, y, W, H);
+    });
+  }
+  function report() {
+    if (window.mudforge) mudforge.send('view', { px: pan.x, py: pan.y, zoom: V.zoom, dragging: !!drag });
+  }
+  function soon() {
+    var t = Date.now();
+    if (t - last > 60) { last = t; report(); }
+  }
+  function zoomBy(d) {
+    var i = V.zooms.indexOf(V.zoom) + d;
+    if (i < 0 || i >= V.zooms.length) return;
+    V.zoom = V.zooms[i];
+    layout(); report();
+  }
+  function begin(e) {
+    clamp();
+    drag = { x: e.clientX, y: e.clientY, p: { x: pan.x, y: pan.y } };
+    try { vp.setPointerCapture(e.pointerId); } catch (_) {}
+    vp.classList.add('drag');
+  }
+  function end() {
+    if (!drag) return;
+    drag = null;
+    V.dragging = false;
+    vp.classList.remove('drag');
+    report();
+  }
+  vp.addEventListener('dragstart', function (e) { e.preventDefault(); });
+  vp.addEventListener('pointerdown', function (e) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    begin(e);
+  });
+  vp.addEventListener('pointermove', function (e) {
+    if (!drag) {
+      // a rewrite mid-drag: pick the drag up again while the button is held
+      if (V.dragging) {
+        if (e.buttons & 1) begin(e);
+        else { V.dragging = false; report(); }
+      }
+      return;
+    }
+    pan = { x: drag.p.x - (e.clientX - drag.x) / k(), y: drag.p.y - (e.clientY - drag.y) / k() };
+    clamp(); layout(); soon();
+  });
+  vp.addEventListener('pointerup', end);
+  vp.addEventListener('pointercancel', end);
+  vp.addEventListener('lostpointercapture', end);
+  addEventListener('pointerup', function () { if (V.dragging && !drag) { V.dragging = false; report(); } });
+  vp.addEventListener('wheel', function (e) { e.preventDefault(); zoomBy(e.deltaY < 0 ? 1 : -1); }, { passive: false });
+  document.getElementById('mzout').onclick = function () { zoomBy(-1); };
+  document.getElementById('mzin').onclick = function () { zoomBy(1); };
+  document.getElementById('mme').onclick = function () { pan = { x: 0, y: 0 }; layout(); report(); };
+  addEventListener('resize', layout);
+  layout();
+}
+</script>
 ]==],
 }
 
@@ -2395,7 +2606,7 @@ local function renderBar()
 end
 
 -- The Map is rewritten whole too, on every Plane, step, Group move and
--- level click (wayfinder #21).
+-- level click (wayfinder #21), laid out from the view Lua holds (#35).
 local function renderMap()
   setWidgetProperty(hud.map.id, "content", widgets.map .. map.html(hud.map.s, fontOf("map")))
 end
@@ -2501,13 +2712,19 @@ end
 
 -- The attach routine (wayfinder #9), shared by init and onConnect: reset every
 -- widget to Unfed; the tick follows with the first feed push.
+-- The Map's zoom is one size on every Plane and kept across sessions, as a
+-- plugin variable (saveState keeps it).
+local function savedZoom()
+  return getVariable("mapZoom")
+end
+
 local function attach()
   hud.status.s = status.new()
   hud.effects.s = effects.new()
   hud.slots.s = slots.new()
   hud.page.s = pages.new()
   hud.quest.s = quests.new()
-  hud.map.s = map.new()
+  hud.map.s = map.new(savedZoom())
   pushAll()
   renderPage()
   renderQuest()
@@ -2536,6 +2753,17 @@ local function onMapAction()
     map.act(hud.map.s, d.action, d.data)
     renderMap()
     focusPrompt()
+  end)
+  -- The page script's view report (drag, wheel, zoom, centre-on-me): the
+  -- page already shows it, so Lua only holds it for the next rewrite. A new
+  -- zoom is remembered; focus goes back to the command line once a drag ends.
+  registerWidgetEvent(hud.map.id, "luamsg", function(m)
+    if m.event ~= "view" then return end
+    local s = hud.map.s
+    local zoom = s.zoom
+    map.view(s, m.data)
+    if s.zoom ~= zoom then setVariable("mapZoom", tostring(s.zoom)) end
+    if not s.dragging then focusPrompt() end
   end)
 end
 

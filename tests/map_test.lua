@@ -237,6 +237,55 @@ eq(map.shown(s), 1, "browse before placed")
 map.act(s, "level", "z0")
 eq(map.browsing(s), false, "back to the default level")
 
+-- ===== Following and Panned (wayfinder #30, #35, #36) =====
+
+-- The zoom: 34 px a cell unless a remembered one of the steps is given
+eq(map.new().zoom, 34, "34 px a cell by default")
+eq(map.new(48).zoom, 48, "a remembered zoom")
+eq(map.new(33).zoom, 34, "not one of the steps: the default")
+eq(map.new("x").zoom, 34, "nothing usable: the default")
+
+-- The page reports its view as an object: the pan in plane units, the zoom,
+-- and whether a drag is in progress
+s = map.new()
+map.map(s, fixture("plane_stubbing"))
+map.where(s, { here = "1285", members = {} })
+eq(map.panned(s), false, "not panned on arrival")
+map.view(s, { px = 40, py = -12.5, zoom = 56, dragging = true })
+eq(map.panned(s), true, "a drag pans")
+eq(s.pan.x, 40, "pan x")
+eq(s.pan.y, -12.5, "pan y")
+eq(s.zoom, 56, "the page's zoom")
+eq(s.dragging, true, "mid-drag")
+map.view(s, { px = 40, py = -12.5, zoom = 30, dragging = false })
+eq(s.zoom, 56, "a zoom that is not a step is ignored")
+eq(s.dragging, false, "released")
+map.view(s, { px = "a", zoom = 48 })
+eq(s.pan.x, 40, "a pan that is not a number is ignored")
+eq(s.zoom, 48, "the rest is still taken")
+map.view(s, { px = 0, py = 0 })
+eq(map.panned(s), false, "centre-on-me: a zero pan")
+eq(s.zoom, 48, "no zoom in the report keeps it")
+
+-- What ends Panned: the player moving, a Plane for another Area; not a
+-- member moving, a re-send for the same Area, or Browsing
+map.view(s, { px = 20, py = 20 })
+map.where(s, { here = "1285", members = { Rei = "1286" } })
+eq(map.panned(s), true, "a member moving leaves it alone")
+map.map(s, fixture("plane_stubbing"))
+eq(map.panned(s), true, "a re-send for the same Area leaves it alone")
+map.act(s, "level", "z1")
+eq(map.panned(s), true, "Browsing keeps the same x/y centre")
+map.where(s, { here = "1286", members = {} })
+eq(map.panned(s), false, "a step re-centres")
+map.view(s, { px = 20, py = 20 })
+map.map(s, fixture("plane_gildhythe"))
+eq(map.panned(s), false, "a new Area re-centres")
+eq(s.zoom, 48, "the zoom is one size on every Plane")
+map.view(s, { px = 20, py = 20, dragging = true })
+map.sever(s)
+eq(map.panned(s), true, "severed: the view stays, frozen")
+
 -- ===== The drawing: look A, "Tiles" (wayfinder #23), Fit (#22), level bar (#24) =====
 
 -- Header: the Area and Region on the left; the font is the widget's own
@@ -247,13 +296,25 @@ h = map.html(s, { family = "Fira", size = 14 })
 has(h, 'style="font-size:14px;font-family:Fira"', "the widget font")
 has(h, '<div class="mhead"><span class="mleft"><span class="marea">the Spit Cut</span><span class="msep">&#183;</span><span class="mregion">the Saffron Fall</span></span></div>', "header: no names, nothing on the right")
 lacks(h, "Level 1", "no level text on a 1-level plane")
-lacks(h, 'class="mlevel"', "no level bar on a 1-level plane")
+lacks(h, 'class="mlevel"', "no level control on a 1-level plane")
+has(h, '<div class="mfoot"><span class="zctl"><span class="zb" id="mzout" title="Zoom out">&#8722;</span>'
+  .. '<span class="zb" id="mzin" title="Zoom in">+</span><span class="zb" id="mme" title="Centre on me">&#9678;</span></span></div>',
+  "the footer bar on a 1-level plane too: zoom out, in, centre on me")
 lacks(h, 'class="mholds"', "no holds footer when nothing is listed")
 
--- Fit: the viewBox frames the whole Plane's x/y bounds (x -1..3, y 0..9),
--- padded 18; the cell size is capped at 34px through max sizes
-has(h, 'viewBox="-38 -198 116 216"', "fit viewBox")
-has(h, 'style="max-width:197.2px;max-height:367.2px"', "cell size cap")
+-- Following: the viewBox is the whole Plane's x/y bounds (x -1..3, y 0..9),
+-- padded 18, drawn at the zoom (34 px a cell of 20 units) in a viewport the
+-- page script lays it out in, from the view Lua holds
+has(h, '<div class="mvp" id="mvp"><svg class="plane" id="mplane" viewBox="-38 -198 116 216" width="197.2" height="367.2">', "drawn at 34 px a cell")
+lacks(h, "max-width", "no Fit cap")
+has(h, '</div><script>mapView({"zoom":34,"zooms":[20,24,28,34,40,48,56],"px":0,"py":0,"dragging":false,'
+  .. '"vb":{"x":-38,"y":-198,"w":116,"h":216},"at":{"x":60,"y":-180},"members":[]})</script>', "the view for the page script, d12 at (3, 9)")
+assert(h:find("<script>", 1, true) > h:find('class="mfoot"', 1, true), "the script runs once the window is there")
+map.view(s, { px = 40, py = -12.5, zoom = 20, dragging = true })
+h = map.html(s)
+has(h, 'width="116" height="216"', "at 20 px a cell")
+has(h, '"zoom":20,', "the zoom held")
+has(h, '"px":40,"py":-12.5,"dragging":true,', "the pan and the drag held, for the page to carry on")
 
 -- Terrain: a field tile with its own texture, in its own translate()
 has(h, '<g class="room" transform="translate(54 -186)">', "d12 at (3, 9)")
@@ -323,8 +384,8 @@ h = map.html(s)
 has(h, 'fill="#fff" stroke="#0d1117"', "a stair on the Plane is solid")
 has(h, "<title>up: stairs</title>", "up stair")
 
--- Level bar: ▼ Level n of m ▲, ▼ dimmed at the bottom
-has(h, '<div class="mlevel">', "level bar on a 2-level plane")
+-- Level control: ▼ Level n of m ▲ in the footer after the zoom, ▼ dimmed at the bottom
+has(h, '</span></span><span class="mlevel">', "level control on a 2-level plane, after the zoom controls")
 has(h, '<span class="lvarrow off" title="Level below">&#9660;</span>', "nothing below")
 has(h, '<span class="lvarrow" title="Level above" data-mud-action="level" data-mud-data="z1">&#9650;</span>', "up to z 1")
 has(h, '<span class="lvmid">Level 1 of 2</span>', "level text")
@@ -337,10 +398,17 @@ has(h, '<span class="lvyou" title="You: level 1 (back to you)" data-mud-action="
 assert(h:find('class="lvyou"', 1, true) < h:find('class="lvmid', 1, true), "you sit at the down end")
 lacks(h, '<g class="you">', "no you ring on a level you are not on")
 
--- The frame holds still while Browsing
+-- The frame holds still while Browsing, centred on the same x/y
 local a = map.html(s):match('viewBox="[^"]*"')
+local at = map.html(s):match('"at":{[^}]*}')
 map.act(s, "level", "mine")
 eq(map.html(s):match('viewBox="[^"]*"'), a, "same frame on both levels")
+eq(map.html(s):match('"at":{[^}]*}'), at, "same centre on both levels")
+
+-- No position yet: the page centres the Plane
+s = map.new()
+map.map(s, fixture("plane_spitcut_door_closed"))
+has(map.html(s), '"at":{"x":20,"y":-90}', "the middle of the viewBox")
 
 -- Group: discs on the plane, fanned per room; members elsewhere by the arrow
 s = map.new()
@@ -360,6 +428,15 @@ map.act(s, "level", "z1")
 h = map.html(s)
 has(h, '<g class="member"><title>&#201;a</title>', "on their level, drawn on the plane")
 eq(count(h, 'class="lvmem"'), 3, "the three below sit by the down arrow")
+
+-- Edge pips: the page gets every member on the level shown, at their Cell's
+-- middle, and pins the ones out of view to the window's edge
+map.act(s, "level", "mine")
+has(map.html(s), '"members":[{"x":0,"y":0,"i":"A","name":"Ana"},{"x":0,"y":0,"i":"R","name":"Rei"},{"x":0,"y":-20,"i":"B","name":"Bo"}]',
+  "the members on your level, in Cell order")
+map.act(s, "level", "z1")
+local U = "\\u"
+has(map.html(s), '"i":"' .. U .. '00c9","name":"' .. U .. '00c9a"}]', "on another level, theirs; names as \\u escapes")
 
 -- holds: a footer with Enemies and Gather
 s = map.new()
@@ -455,7 +532,8 @@ local function strip(h)
   h = h:gsub('<text class="lead".-</text>', "")
   h = h:gsub("></line>", "/>")
   h = h:gsub(' viewBox="[^"]*"', "")
-  h = h:gsub(' style="max%-width:[^"]*"', "")
+  h = h:gsub(' width="[%d%.]+" height="[%d%.]+">', ">")   -- the size follows the viewBox
+  h = h:gsub("<script>.-</script>", "")
   h = h:gsub('<div class="mhead">.-</div>', "")
   return h
 end

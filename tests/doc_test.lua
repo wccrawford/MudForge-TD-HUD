@@ -88,4 +88,15 @@ eq(doc.fontStyle(font), ' style="font-size:16px;font-family:&quot;Fira Code&quot
 eq(doc.fontStyle({}), "", "no font, no style")
 has(doc.frame({ state = "live", at = 0, count = 0, body = "", font = font }), 'class="hud rd" data-state="live" style="font-size:16px', "frame carries the font")
 
+-- A string for a page script: JSON's quotes and escapes, non-ASCII as \u
+-- escapes (Latin-1 again, wayfinder #35), and no "<" to end the script early
+eq(doc.jstr([[say "hi"\]]), [["say \"hi\"\\"]], "quotes and backslashes")
+local U = "\\u"   -- a backslash and u, spelled out
+eq(doc.jstr("caf\195\169"), '"caf' .. U .. '00e9"', "two-byte UTF-8")
+eq(doc.jstr("\226\134\151"), '"' .. U .. '2197"', "three-byte UTF-8")
+eq(doc.jstr("\240\159\144\128"), '"' .. U .. 'd83d' .. U .. 'dc00"', "beyond the BMP: a surrogate pair")
+eq(doc.jstr("a\233b"), '"a' .. U .. 'fffdb"', "a stray byte is the replacement character")
+eq(doc.jstr("</script>\n"), '"' .. U .. '003c/script>' .. U .. '000a"', "no tag, no raw control character")
+eq(doc.jstr(nil), '""', "nil is empty")
+
 print("doc_test: OK")

@@ -145,7 +145,7 @@ local function renderBar()
 end
 
 -- The Map is rewritten whole too, on every Plane, step, Group move and
--- level click (wayfinder #21).
+-- level click (wayfinder #21), laid out from the view Lua holds (#35).
 local function renderMap()
   setWidgetProperty(hud.map.id, "content", widgets.map .. map.html(hud.map.s, fontOf("map")))
 end
@@ -251,13 +251,19 @@ end
 
 -- The attach routine (wayfinder #9), shared by init and onConnect: reset every
 -- widget to Unfed; the tick follows with the first feed push.
+-- The Map's zoom is one size on every Plane and kept across sessions, as a
+-- plugin variable (saveState keeps it).
+local function savedZoom()
+  return getVariable("mapZoom")
+end
+
 local function attach()
   hud.status.s = status.new()
   hud.effects.s = effects.new()
   hud.slots.s = slots.new()
   hud.page.s = pages.new()
   hud.quest.s = quests.new()
-  hud.map.s = map.new()
+  hud.map.s = map.new(savedZoom())
   pushAll()
   renderPage()
   renderQuest()
@@ -286,6 +292,17 @@ local function onMapAction()
     map.act(hud.map.s, d.action, d.data)
     renderMap()
     focusPrompt()
+  end)
+  -- The page script's view report (drag, wheel, zoom, centre-on-me): the
+  -- page already shows it, so Lua only holds it for the next rewrite. A new
+  -- zoom is remembered; focus goes back to the command line once a drag ends.
+  registerWidgetEvent(hud.map.id, "luamsg", function(m)
+    if m.event ~= "view" then return end
+    local s = hud.map.s
+    local zoom = s.zoom
+    map.view(s, m.data)
+    if s.zoom ~= zoom then setVariable("mapZoom", tostring(s.zoom)) end
+    if not s.dragging then focusPrompt() end
   end)
 end
 
