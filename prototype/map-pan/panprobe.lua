@@ -38,7 +38,7 @@ down: stairs</title><rect width="12" height="12" rx="2" fill="#a371f7"/><rect wi
 plugin = {
   id = "panprobe",
   name = "panprobe",
-  version = "0.0.1",
+  version = "0.0.3",
   author = "wccrawford",
   description = "PROTOTYPE: Map follow/zoom/pan probes (wayfinder #35).",
 }
@@ -47,6 +47,8 @@ local P = nil       -- the probe in flight: mode, plane, widget, positions, time
 local logl = {}
 local ZOOMS = { 20, 24, 28, 34, 40, 48, 56 }
 local zoomAt = 4    -- 34 px per cell; kept across probes as a real window would
+local opens = 0     -- each window gets its own name
+local VERSION = "0.0.3"
 
 local function say(s)
   logl[#logl + 1] = s
@@ -185,7 +187,7 @@ local function report()
   if not P then return "no probe open\r\n" end
   local lat, js = {}, {}
   for _, v in ipairs(P.got) do lat[#lat + 1] = v.lat; js[#js + 1] = v.js end
-  local s = string.format("mode %s plane %s: %d acked; end-to-end ms med %d max %d; page js ms med %.1f; lua ms med %.2f; bytes/update %d; zoom %d; pan %.0f,%.0f",
+  local s = string.format("v" .. VERSION .. " mode %s plane %s:%d acked; end-to-end ms med %d max %d; page js ms med %.1f; lua ms med %.2f; bytes/update %d; zoom %d; pan %.0f,%.0f",
     P.mode, P.name, #lat, median(lat), (function() local m = 0 for _, v in ipairs(lat) do if v > m then m = v end end return m end)(),
     median(js), median(P.lua), P.bytes or 0, ZOOMS[zoomAt], P.pan[1], P.pan[2])
     .. string.format("; sent %d; got done %d, view %d", P.k, P.msgs.done or 0, P.msgs.view or 0)
@@ -201,8 +203,9 @@ local function open(mode, name)
   if P and P.id then destroyWidget(P.id) end
   local vb = {}
   for v in string.gmatch(plane.vb, "%S+") do vb[#vb + 1] = tonumber(v) end
+  opens = opens + 1
   local id = createWidget({
-    type = "html", name = "panprobe", title = "panprobe " .. mode .. " " .. name,
+    type = "html", name = "panprobe-" .. opens, title = "panprobe " .. mode .. " " .. name,
     position = { x = 120, y = 100 }, size = { width = 420, height = 320 },
   })
   P = { mode = mode, name = name, plane = plane, id = id, vb = vb, step = 1, mstep = 1, pan = { 0, 0 },
@@ -227,7 +230,15 @@ local function open(mode, name)
   end)
   registerWidgetEvent(id, "close", function() stopTimers(); P = nil end)
   send(nextKey(), at(P.step), nil, true)
-  return "panprobe " .. mode .. " " .. name .. ": drag to pan, wheel to zoom, hover a tile; then pan walk / pan member\r\n"
+  -- no "done" from the first page within a second: say so and write it again
+  local me = P
+  addTimer(1000, function()
+    if P == me and (P.msgs.done or 0) == 0 then
+      say("no done from the first page of " .. id .. "; writing it again")
+      send(nextKey(), at(P.step), nil, true)
+    end
+  end, false)
+  return "panprobe v" .. VERSION .. " " .. mode .. " " .. name .. ": drag to pan, wheel to zoom, hover a tile; then pan walk / pan member\r\n"
 end
 
 function init()
