@@ -2442,7 +2442,11 @@ function mapView(V) {
     e.preventDefault();
     begin(e);
   });
-  vp.addEventListener('pointermove', function (e) {
+  // moves and releases are heard on the whole page: a drag picked up after a
+  // rewrite has no pointer capture, and a release outside the window never
+  // arrives, so a move with the button up ends the drag (#33 walk)
+  addEventListener('pointermove', function (e) {
+    if (drag && !(e.buttons & 1)) { end(); return; }
     if (!drag) {
       // a rewrite mid-drag: pick the drag up again while the button is held
       if (V.dragging) {
@@ -2454,7 +2458,7 @@ function mapView(V) {
     pan = { x: drag.p.x - (e.clientX - drag.x) / k(), y: drag.p.y - (e.clientY - drag.y) / k() };
     clamp(); layout(); soon();
   });
-  vp.addEventListener('pointerup', end);
+  addEventListener('pointerup', end);
   vp.addEventListener('pointercancel', end);
   vp.addEventListener('lostpointercapture', end);
   addEventListener('pointerup', function () { if (V.dragging && !drag) { V.dragging = false; report(); } });
