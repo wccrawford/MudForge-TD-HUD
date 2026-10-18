@@ -72,18 +72,21 @@ local function content(k)
   local you, mem = at(P.step), at(P.mstep)
   local state = json.encodeForScript({
     mode = P.mode, k = k, zoom = ZOOMS[zoomAt], zooms = ZOOMS, here = { you[2], you[3] },
-    pan = P.pan, vb = P.vb, name = you[4] .. " (caf\195\169)",
+    pan = P.pan, vb = P.vb, name = you[4], dragging = P.dragging, enc = "caf\195\169",
   })
   return [==[<style>html,body{margin:0;height:100%;background:#0d1117;overflow:hidden;color:#c9d1d9;font:12px system-ui,sans-serif}
 #hd{position:absolute;top:0;left:0;right:0;height:22px;display:flex;gap:6px;align-items:center;padding:0 4px;border-bottom:1px solid #30363d;white-space:nowrap;overflow:hidden}
 #hd b{color:#e6edf3}#hd button{background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:3px;padding:0 6px;cursor:pointer}
-#vp{position:absolute;top:23px;left:0;right:0;bottom:0;overflow:hidden;cursor:grab;touch-action:none}
-#vp.drag{cursor:grabbing}#pl{position:absolute;left:0;top:0;display:block}</style>
-<div id="hd"><b>]==] .. P.plane.area .. [==[</b><span id="nm"></span><span data-mud-bind="bnm"></span>
+#vp{position:absolute;top:23px;left:0;right:0;bottom:18px;overflow:hidden;cursor:grab;touch-action:none}
+#vp.drag{cursor:grabbing}#pl{position:absolute;left:0;top:0;display:block;user-select:none;-webkit-user-drag:none}
+#enc{position:absolute;left:0;right:0;bottom:0;background:#161b22;padding:1px 4px;font-size:11px;white-space:nowrap;overflow:hidden;border-top:1px solid #30363d}</style>
+<div id="hd"><b>]==] .. P.plane.area .. [==[</b><span id="nm"></span>
 <button id="zm">-</button><span id="zv"></span><button id="zp">+</button><button id="me">me</button><span id="st"></span></div>
 <div id="vp"><svg id="pl" viewBox="]==] .. P.plane.vb .. [==[">]==] .. P.plane.svg
     .. marker("mem", mem, "Rei", MEM) .. marker("you", you, "You", YOU) .. [==[</svg></div>
+<div id="enc">raw:caf]==] .. "\195\169" .. [==[ | ent:caf&#233; | json:<span id="ej"></span> | jsu:<span id="eu"></span> | bound:<span data-mud-bind="bnm"></span> | msg:<span id="em"></span></div>
 <script>var S=]==] .. state .. [==[;
+document.getElementById('ej').textContent=S.enc;document.getElementById('eu').textContent='café';
 var vp=document.getElementById('vp'),pl=document.getElementById('pl'),st=document.getElementById('st');
 var t0=performance.now();
 function k(){return S.zoom/20}
@@ -100,13 +103,21 @@ function layout(){var W=vp.clientWidth,H=vp.clientHeight,pw=S.vb[2]*k(),ph=S.vb[
  pl.style.transform='translate('+axis(W,pw,S.vb[0],S.here[0]+S.pan[0])+'px,'+axis(H,ph,S.vb[1],S.here[1]+S.pan[1])+'px)';
  document.getElementById('zv').textContent=S.zoom+'px';
  document.getElementById('nm').textContent=S.name}
-function report(){mudforge.send('view',{pan:S.pan,zoom:S.zoom})}
+// to Lua as an object: a JSON array reaches Lua 0-based
+function report(){mudforge.send('view',{px:S.pan[0],py:S.pan[1],zoom:S.zoom,dragging:!!drag})}
+var lastRep=0;function reportSoon(){var t=performance.now();if(t-lastRep>60){lastRep=t;report()}}
 function zoomBy(d){var i=S.zooms.indexOf(S.zoom)+d;if(i<0||i>=S.zooms.length)return;S.zoom=S.zooms[i];clampPan();layout();report()}
-var drag=null,drags=0,moves=0;
-vp.addEventListener('pointerdown',function(e){if(e.button!==0)return;drag={x:e.clientX,y:e.clientY,p:S.pan.slice()};vp.setPointerCapture(e.pointerId);vp.classList.add('drag');drags++});
-vp.addEventListener('pointermove',function(e){if(!drag)return;moves++;S.pan=[drag.p[0]-(e.clientX-drag.x)/k(),drag.p[1]-(e.clientY-drag.y)/k()];clampPan();layout()});
-function end(){if(!drag)return;drag=null;vp.classList.remove('drag');report();st.textContent='drags '+drags+' moves '+moves}
+var drag=null,drags=0,moves=0,resumed=0;
+function begin(e){drag={x:e.clientX,y:e.clientY,p:S.pan.slice()};try{vp.setPointerCapture(e.pointerId)}catch(_){}vp.classList.add('drag')}
+vp.addEventListener('dragstart',function(e){e.preventDefault()});
+vp.addEventListener('pointerdown',function(e){if(e.button!==0)return;e.preventDefault();begin(e);drags++});
+// a rewrite mid-drag: the new page picks the drag up while the button is still held
+vp.addEventListener('pointermove',function(e){
+ if(!drag){if(S.dragging&&(e.buttons&1)){begin(e);resumed++;st.textContent='resumed '+resumed}return}
+ moves++;S.pan=[drag.p[0]-(e.clientX-drag.x)/k(),drag.p[1]-(e.clientY-drag.y)/k()];clampPan();layout();reportSoon()});
+function end(){if(!drag)return;drag=null;S.dragging=false;vp.classList.remove('drag');report();st.textContent='drags '+drags+' moves '+moves}
 vp.addEventListener('pointerup',end);vp.addEventListener('pointercancel',end);vp.addEventListener('lostpointercapture',end);
+addEventListener('pointerup',function(){if(S.dragging){S.dragging=false;report()}});
 var wheels=0;vp.addEventListener('wheel',function(e){e.preventDefault();wheels++;zoomBy(e.deltaY<0?1:-1);st.textContent='wheels '+wheels},{passive:false});
 document.getElementById('zm').onclick=function(){zoomBy(-1)};document.getElementById('zp').onclick=function(){zoomBy(1)};
 document.getElementById('me').onclick=function(){S.pan=[0,0];layout();report()};
@@ -115,27 +126,28 @@ function done(key,t){requestAnimationFrame(function(){mudforge.send('done',{k:ke
 mudforge.onMessage(function(d){var t=performance.now();
  if(d.you){S.here=[d.you[0],d.you[1]];S.pan=[0,0];S.name=d.name;
   document.getElementById('you').setAttribute('transform','translate('+d.you[0]+' '+d.you[1]+')')}
+ if(d.enc)document.getElementById('em').textContent=d.enc;
  if(d.mem)document.getElementById('mem').setAttribute('transform','translate('+d.mem[0]+' '+d.mem[1]+')');
  layout();done(d.k,t)});
 layout();done(S.k,t0);</script>]==]
 end
 
-local function send(k, you, mem)
+local function send(k, you, mem, first)
   P.sent[tostring(k)] = getCurrentTime()
   local c0 = os.clock()
-  if P.mode == "a" then
+  if P.mode == "a" or first then
     local s = content(k)
     setWidgetProperty(P.id, "content", s)
     P.bytes = #s
   else
     local d = { k = k }
-    if you then d.you = { you[2], you[3] }; d.name = you[4] .. " (caf\195\169)" end
+    if you then d.you = { you[2], you[3] }; d.name = you[4]; d.enc = "caf\195\169" end
     if mem then d.mem = { mem[2], mem[3] } end
     sendWidgetMessage(P.id, d)
     P.bytes = #json.encode(d)
   end
   P.lua[#P.lua + 1] = (os.clock() - c0) * 1000
-  if you then setBoundValues(P.id, { bnm = "| bound: " .. you[4] .. " (caf\195\169)" }) end
+  if you then setBoundValues(P.id, { bnm = "caf\195\169" }) end
 end
 
 local function nextKey()
@@ -176,6 +188,7 @@ local function report()
   local s = string.format("mode %s plane %s: %d acked; end-to-end ms med %d max %d; page js ms med %.1f; lua ms med %.2f; bytes/update %d; zoom %d; pan %.0f,%.0f",
     P.mode, P.name, #lat, median(lat), (function() local m = 0 for _, v in ipairs(lat) do if v > m then m = v end end return m end)(),
     median(js), median(P.lua), P.bytes or 0, ZOOMS[zoomAt], P.pan[1], P.pan[2])
+    .. string.format("; sent %d; got done %d, view %d", P.k, P.msgs.done or 0, P.msgs.view or 0)
   say(s)
   return table.concat(logl, "\r\n") .. "\r\n"
 end
@@ -193,9 +206,10 @@ local function open(mode, name)
     position = { x = 120, y = 100 }, size = { width = 420, height = 320 },
   })
   P = { mode = mode, name = name, plane = plane, id = id, vb = vb, step = 1, mstep = 1, pan = { 0, 0 },
-    k = 0, sent = {}, got = {}, lua = {} }
+    k = 0, sent = {}, got = {}, lua = {}, msgs = {}, dragging = false }
   registerWidgetEvent(id, "luamsg", function(m)
     if not P or P.id ~= id then return end
+    P.msgs[m.event] = (P.msgs[m.event] or 0) + 1
     if m.event == "done" then
       local key = tostring(m.data.k)
       local t0 = P.sent[key]
@@ -205,13 +219,14 @@ local function open(mode, name)
       end
     elseif m.event == "view" then
       -- only rewrite mode needs these, but both keep them as the lib would
-      local pan, z = m.data.pan or {}, tonumber(m.data.zoom)
-      P.pan = { tonumber(pan[1]) or 0, tonumber(pan[2]) or 0 }
+      local z = tonumber(m.data.zoom)
+      P.pan = { tonumber(m.data.px) or 0, tonumber(m.data.py) or 0 }
+      P.dragging = m.data.dragging == true
       for i, v in ipairs(ZOOMS) do if v == z then zoomAt = i end end
     end
   end)
   registerWidgetEvent(id, "close", function() stopTimers(); P = nil end)
-  send(nextKey(), at(P.step), nil)
+  send(nextKey(), at(P.step), nil, true)
   return "panprobe " .. mode .. " " .. name .. ": drag to pan, wheel to zoom, hover a tile; then pan walk / pan member\r\n"
 end
 
