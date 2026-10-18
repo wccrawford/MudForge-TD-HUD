@@ -17,6 +17,14 @@ eq(doc.escape([[<b>"Tom & Jerry"</b>]]), "&lt;b&gt;&quot;Tom &amp; Jerry&quot;&l
 eq(doc.escape(nil), "", "escape nil")
 eq(doc.escape(3), "3", "escape number")
 
+-- Non-ASCII leaves as numeric entities: MudForge hands Lua's strings to the
+-- page as Latin-1, so raw UTF-8 would show as "cafÃ©" (wayfinder #35)
+eq(doc.escape("caf\195\169"), "caf&#233;", "two-byte UTF-8")
+eq(doc.escape("\226\134\151 \195\137a"), "&#8599; &#201;a", "three-byte and back to back")
+eq(doc.escape("\240\159\144\128"), "&#128000;", "four-byte UTF-8")
+eq(doc.escape("a\233b"), "a&#65533;b", "a stray byte is the replacement character")
+eq(doc.escape("\195"), "&#65533;", "a cut-off sequence too")
+
 -- A plain line
 eq(doc.line({ { text = "Rat Problem [in progress]" } }), '<div class="ln">Rat Problem [in progress]</div>', "plain line")
 

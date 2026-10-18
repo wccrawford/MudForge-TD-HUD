@@ -25,6 +25,13 @@ local function fixture(name)
   return dofile("tests/fixtures/map/" .. name .. ".lua")
 end
 
+local function sortedKeysOf(t)
+  local ks = {}
+  for k in pairs(t) do ks[#ks + 1] = k end
+  table.sort(ks)
+  return ks
+end
+
 -- Replays a captured sequence's Area.Map and Area.Where into s, in order.
 local function replay(s, name)
   for _, e in ipairs(fixture(name)) do
@@ -116,20 +123,20 @@ eq(s.here, "d12", "at the vault door")
 s = map.new()
 replay(s, "seq_delve_grow")
 eq(s.here, "d4", "walked in")
-eq(s.rooms.d4 ~= nil, true, "the grown plane")
+eq(s.cells.d4 ~= nil, true, "the grown plane")
 
 -- A Depth descent is just a new Plane: the old Depth's rooms are gone
 s = map.new()
 replay(s, "seq_depth_descend")
 eq(s.area, "the Lees, Depth 2", "descended")
 eq(s.here, "d13", "placed on Depth 2")
-eq(s.rooms.d12, nil, "Depth 1 dropped")
+eq(s.cells.d12, nil, "Depth 1 dropped")
 
 -- A door opening re-sends the Plane alone; the player stays where they are
 s = map.new()
 replay(s, "seq_door_opened")
 eq(s.here, "d11", "still at the windlass")
-eq(s.rooms.d12.doors.north.closed, false, "the vault door is open")
+eq(s.cells.d12.doors.north.closed, false, "the vault door is open")
 
 -- config map off/on: the re-send changes nothing that matters
 s = map.new()
@@ -232,13 +239,13 @@ eq(map.browsing(s), false, "back to the default level")
 
 -- ===== The drawing: look A, "Tiles" (wayfinder #23), Fit (#22), level bar (#24) =====
 
--- Header: the Area and Region only; the font is the widget's own
+-- Header: the Area and Region on the left; the font is the widget's own
 s = map.new()
 map.map(s, fixture("plane_spitcut_door_closed"))
 map.where(s, { here = "d12", members = {} })
 h = map.html(s, { family = "Fira", size = 14 })
 has(h, 'style="font-size:14px;font-family:Fira"', "the widget font")
-has(h, '<span class="marea">the Spit Cut</span><span class="mregion">the Saffron Fall</span>', "header")
+has(h, '<div class="mhead"><span class="mleft"><span class="marea">the Spit Cut</span><span class="msep">&#183;</span><span class="mregion">the Saffron Fall</span></span></div>', "header: no names, nothing on the right")
 lacks(h, "Level 1", "no level text on a 1-level plane")
 lacks(h, 'class="mlevel"', "no level bar on a 1-level plane")
 lacks(h, 'class="mholds"', "no holds footer when nothing is listed")
@@ -339,7 +346,7 @@ eq(map.html(s):match('viewBox="[^"]*"'), a, "same frame on both levels")
 s = map.new()
 map.map(s, fixture("plane_gildhythe"))
 local upId
-for id, r in pairs(s.rooms) do if r.z == 1 then upId = id end end
+for id, r in pairs(s.cells) do if r.z == 1 then upId = id end end
 map.where(s, { here = "249", members = { Rei = "247", Ana = "247", Bo = "249", ["\195\137a"] = upId } })
 h = map.html(s)
 eq(count(h, '<g class="member">'), 3, "three members on the level shown")
@@ -347,11 +354,11 @@ has(h, "<title>You, with Bo</title>", "a member in your room folds into your mar
 local ana = h:match('<g class="member"><title>Ana</title><circle cx="([%-%d%.]+)"')
 local rei = h:match('<g class="member"><title>Rei</title><circle cx="([%-%d%.]+)"')
 eq(tonumber(rei) - tonumber(ana), 6, "fanned right in one room")
-has(h, '<span class="lvmem" title="\195\137a: level 2" data-mud-action="level" data-mud-data="z1">\195\137</span>', "a member above, by the up arrow, initial in UTF-8")
+has(h, '<span class="lvmem" title="&#201;a: level 2" data-mud-action="level" data-mud-data="z1">&#201;</span>', "a member above, by the up arrow, the initial whole, as an entity")
 assert(h:find('class="lvmem"', 1, true) > h:find('class="lvmid', 1, true), "members above sit at the up end")
 map.act(s, "level", "z1")
 h = map.html(s)
-has(h, '<g class="member"><title>\195\137a</title>', "on their level, drawn on the plane")
+has(h, '<g class="member"><title>&#201;a</title>', "on their level, drawn on the plane")
 eq(count(h, 'class="lvmem"'), 3, "the three below sit by the down arrow")
 
 -- holds: a footer with Enemies and Gather
@@ -396,5 +403,194 @@ s = map.new()
 replay(s, "seq_delve_names")
 eq(s.area, "the Lees, Depth 2", "descended")
 eq(s.here, "d10", "placed on Depth 2")
+
+-- ===== Rooms, names and Wards (wayfinder #32): look D, "Floor and dots" (#31) =====
+
+-- The Plane keeps names and wards, each Cell its room, ward and leads; each
+-- absent when the package leaves it out
+s = map.new()
+map.map(s, fixture("plane_synthetic_town_rooms"))
+eq(s.names["422"], "the market square", "names kept")
+eq(s.wards.rookery, "the Rookery", "wards kept")
+eq(s.cells["413"].room, "412", "room kept")
+eq(s.cells["412"].ward, "drove_end", "ward kept")
+eq(s.cells["414"].leads.north, "the Green Road", "leads kept")
+eq(s.cells["440"].room, nil, "no room key, none kept")
+eq(s.cells["412"].leads, nil, "no leads, none kept")
+s = map.new()
+map.map(s, fixture("plane_gildhythe"))
+eq(s.names, nil, "a Plane with no names has none")
+eq(s.wards, nil, "a Plane with no wards has none")
+eq(s.cells["247"].ward, nil, "a Cell with no ward has none")
+map.map(s, { area = "Opaque", rooms = { a = { x = 0, y = 0, z = 0, room = 7 }, b = { x = 1, y = 0, z = 0, room = 7 } } })
+eq(s.cells.a.room, "7", "a room id is kept as text, never read as a number")
+
+-- The Rooms of the level shown: their parts, and whether they fill their box
+local function roomsById(st)
+  local out = {}
+  for _, R in ipairs(map.rooms(st)) do out[R.id] = R end
+  return out
+end
+s = map.new()
+map.map(s, fixture("plane_synthetic_town_rooms"))
+local rs = roomsById(s)
+eq(rs["412"].kind, "rect", "the avenue fills its box")
+eq(#rs["412"].parts, 3, "three parts")
+eq(rs["422"].kind, "rect", "the market square: an id that is not its lowest part")
+eq(table.concat(rs["422"].parts, ","), "420,421,422,423", "its parts, sorted")
+eq(rs["430"].kind, "band", "the slant is a Diagonal run")
+eq(rs["440"].kind, "cell", "a Cell with no room key is a Room by itself")
+eq(rs["442"], nil, "only the level shown")
+map.map(s, { area = "Ell", rooms = { a = { x = 0, y = 0, z = 0, room = "a" }, b = { x = 1, y = 0, z = 0, room = "a" },
+  c = { x = 1, y = 1, z = 0, room = "a" } } })
+eq(roomsById(s).a.kind, "tiles", "neither box nor diagonal: drawn as its Cells' tiles")
+lacks(map.html(s), 'class="rshape"', "with no shape")
+eq(count(map.html(s), '<g class="room"'), 3, "one tile each")
+
+-- A live Plane (names and leads, no room or ward) draws as v0.6.0 apart from
+-- tooltips and lead labels: the same Plane with names and leads taken out
+-- draws the same once those are stripped
+local function strip(h)
+  h = h:gsub("<title>.-</title>", "")
+  h = h:gsub('<text class="lead".-</text>', "")
+  h = h:gsub("></line>", "/>")
+  h = h:gsub(' viewBox="[^"]*"', "")
+  h = h:gsub(' style="max%-width:[^"]*"', "")
+  h = h:gsub('<div class="mhead">.-</div>', "")
+  return h
+end
+local function bare(pkg)
+  pkg.names = nil
+  for _, c in pairs(pkg.rooms) do c.leads = nil end
+  return pkg
+end
+for _, name in ipairs({ "plane_gildhythe_named", "plane_greenroad_named", "plane_tallyglass_named",
+  "plane_glassfall_named", "plane_ochrefringe_named", "plane_ringingrows_named" }) do
+  local first = sortedKeysOf(fixture(name).rooms)[1]
+  local a, b = map.new(), map.new()
+  map.map(a, fixture(name))
+  map.where(a, { here = first, members = { Rei = first } })
+  map.map(b, bare(fixture(name)))
+  map.where(b, { here = first, members = { Rei = first } })
+  local ha = map.html(a)
+  eq(strip(ha), strip(map.html(b)), name .. " draws as v0.6.0 apart from tooltips and lead labels")
+  for _, part in ipairs({ 'class="rshape"', 'class="dot"', 'class="ward"', 'class="rlabel"', 'class="mlegend"' }) do
+    lacks(ha, part, name .. " has no Rooms or Wards to draw")
+  end
+end
+
+-- Leads: in the stub's and the Cell's tooltip, and a label where it fits
+s = map.new()
+map.map(s, fixture("plane_gildhythe_named"))
+h = map.html(s)
+has(h, "<title>north: to the Green Road</title></line>", "a stub names its Lead")
+has(h, "\nnorth: to the Green Road", "and so does its Cell")
+has(h, "<title>vault: to Your Strongbox</title>", "a leave with no compass word names its Lead on the disc")
+has(h, '<text class="lead"', "lead labels drawn where they fit")
+has(h, ">the Green Road</text>", "the gate north")
+
+-- Names lead every tooltip, the Ward next; the header's right names your Room and Ward
+s = map.new()
+map.map(s, fixture("plane_synthetic_town_rooms"))
+map.where(s, { here = "420", members = {} })
+h = map.html(s)
+has(h, "<title>the avenue\nDrove End\ncity\neast: gate (open)</title>", "a Cell's tooltip: Room, Ward, then as before")
+has(h, "<title>the avenue\nDrove End\ncity\nexchange: to the Brass Exchange\nnorth: to the Green Road</title>", "with its Leads")
+has(h, '<span class="mright"><span class="mroom">the market square</span><span class="msep">&#183;</span>'
+  .. '<span class="mward"><i style="background:#f778ba"></i>Drove End</span></span>', "header right: Room and Ward")
+map.act(s, "level", "z-1")
+lacks(map.html(s), 'class="mright"', "not while Browsing")
+s = map.new()
+map.map(s, fixture("plane_gildhythe_named"))
+map.where(s, { here = "217", members = {} })
+has(map.html(s), '<span class="mright"><span class="mroom">Causeway Street, by the dyehouse</span></span>', "a Room with no Ward")
+
+-- A Room of 2+ Cells: one faded shape, edges over it, a dot per Cell
+s = map.new()
+map.map(s, fixture("plane_synthetic_town_rooms"))
+h = map.html(s)
+eq(count(h, '<g class="rshape"'), 3, "the avenue, the market square, the slant")
+has(h, '<g class="rshape" opacity=".38" transform="translate(54 -86)"><rect width="12" height="52" rx="2" fill="#a371f7"/>'
+  .. '<rect width="12" height="52" rx="2" fill="url(#pA-city)"/></g>', "a rect spans its tiles' footprint, textured in its own frame")
+has(h, 'transform="translate(20 0) rotate(-45) translate(-34.28 -6)"', "a Diagonal run is a band from end Cell to end Cell")
+eq(count(h, 'class="dot"'), 10, "a dot on every Cell of a 2+ Cell Room")
+has(h, '<line x1="60" y1="-40" x2="60" y2="-60"', "the edge between two Cells of one Room is drawn")
+assert(h:find('class="rshape"', 1, true) < h:find('<line x1="60" y1="-40"', 1, true), "under the edges")
+eq(count(h, '<g class="room"'), 2, "the one-Cell Rooms keep their tiles")
+
+-- Room labels beside 2+ Cell Rooms only
+has(h, '>the market square</text>', "a 2+ Cell Room is labelled")
+lacks(h, '>the Hose Post</text>', "a one-Cell Room is not")
+local lbl = h:find('class="rlabel"', 1, true)
+assert(lbl > h:find('class="dot"', 1, true) and lbl < (h:find('<g class="you"', 1, true) or h:find('class="door"', 1, true)),
+  "labels over the Rooms, under the markers")
+
+-- A label with no clear side is dropped, its name kept in the tooltip
+local crowd = { area = "Crowd", names = { r = "the boxed-in hall" }, rooms = {
+  r = { x = 0, y = 0, z = 0, room = "r" }, r2 = { x = 1, y = 0, z = 0, room = "r" } } }
+for _, p in ipairs({ { -1, 1 }, { 0, 1 }, { 1, 1 }, { 2, 1 }, { -1, -1 }, { 0, -1 }, { 1, -1 }, { 2, -1 }, { -1, 0 }, { 2, 0 } }) do
+  crowd.rooms["c" .. p[1] .. "_" .. p[2]] = { x = p[1], y = p[2], z = 0, leaves = { "up" } }
+end
+s = map.new()
+map.map(s, crowd)
+h = map.html(s)
+lacks(h, 'class="rlabel"', "no clear side")
+has(h, "<title>the boxed-in hall\nno terrain", "the name stays in the tooltip")
+
+-- A lead label that would cover a tile is left to the tooltip; one past the
+-- Plane's edge grows the frame
+s = map.new()
+map.map(s, { area = "Tight", rooms = { a = { x = 0, y = 0, z = 0, leaves = { "north" }, leads = { north = "Far Away" } },
+  b = { x = 0, y = 1, z = 0 } } })
+h = map.html(s)
+lacks(h, 'class="lead"', "it would cover b's tile")
+has(h, "<title>north: to Far Away</title>", "hover only")
+s = map.new()
+map.map(s, { area = "Wide", rooms = { a = { x = 0, y = 0, z = 0, leaves = { "east" }, leads = { east = "the Very Long Road" } } } })
+h = map.html(s)
+has(h, ">the Very Long Road</text>", "drawn")
+local vw = tonumber(h:match('viewBox="[%-%d%.]+ [%-%d%.]+ ([%d%.]+)'))
+assert(vw > 36, "the frame grows to hold it: " .. vw)
+
+-- Wards: a tint and a dashed outline per Ward, hues in the sorted order of wards
+s = map.new()
+map.map(s, fixture("plane_synthetic_town_rooms"))
+h = map.html(s)
+has(h, '<g class="ward" opacity=".1" fill="#f778ba">', "drove_end, first")
+has(h, '<g class="ward" opacity=".1" fill="#e3b341">', "sumps, third after the Rookery")
+eq(count(h, 'class="wardline"'), 2, "a dashed outline for each Ward with Cells")
+has(h, 'stroke-dasharray="3 2" stroke-opacity=".85"', "dashed")
+eq(count(h, "<polygon"), 6, "the slant's two diagonal exits bridge the Sumps (each in the tint, the mask and the outline)")
+assert(h:find('class="ward"', 1, true) < h:find('class="rshape"', 1, true), "under everything")
+
+-- Two Wards' bridges crossing in one block draw neither
+s = map.new()
+map.map(s, { area = "Cross", wards = { x = "X", y = "Y" }, rooms = {
+  a = { x = 0, y = 0, z = 0, ward = "x", exits = { northeast = "b" } }, b = { x = 1, y = 1, z = 0, ward = "x", exits = { southwest = "a" } },
+  c = { x = 1, y = 0, z = 0, ward = "y", exits = { northwest = "d" } }, d = { x = 0, y = 1, z = 0, ward = "y", exits = { southeast = "c" } } } })
+eq(count(map.html(s), "<polygon"), 0, "an X crossing of two Wards: no bridges")
+map.map(s, { area = "Cross", wards = { x = "X" }, rooms = {
+  a = { x = 0, y = 0, z = 0, ward = "x", exits = { northeast = "b" } }, b = { x = 1, y = 1, z = 0, ward = "x", exits = { southwest = "a" } } } })
+eq(count(map.html(s), "<polygon"), 3, "one Ward's diagonal: a bridge")
+
+-- The Ward legend: a row for each Ward, hollow for a Ward with no Cells
+s = map.new()
+map.map(s, fixture("plane_synthetic_town_rooms"))
+h = map.html(s)
+has(h, '<div class="mlegend"><span class="lgw" title="Drove End"><i style="background:#f778ba"></i>Drove End</span>'
+  .. '<span class="lgw hollow" title="the Rookery: its own map, through the door that names it"><i style="border-color:#56d4dd"></i>the Rookery</span>'
+  .. '<span class="lgw" title="the Sumps"><i style="background:#e3b341"></i>the Sumps</span></div>', "legend")
+assert(h:find('class="mlegend"', 1, true) < h:find('class="mlevel"', 1, true), "under the map, over the level bar")
+
+-- Every plane with the new keys, captured or synthetic, is taken and drawn
+for _, name in ipairs({ "plane_synthetic_town_rooms", "plane_synthetic_ward_wilds", "plane_synthetic_delve_rooms" }) do
+  s = map.new()
+  map.map(s, fixture(name))
+  has(map.html(s), "<svg", name .. " draws")
+  eq(map.html(s), map.html(s), name .. " draws the same each time")
+end
+s = map.new()
+replay(s, "seq_delve_names")
+has(map.html(s), "<svg", "the named Depth draws")
 
 print("map_test: OK")

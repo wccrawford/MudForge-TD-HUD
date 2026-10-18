@@ -28,12 +28,29 @@ function M.copy(lines)
   return out
 end
 
+-- One UTF-8 sequence (a lead byte and its continuation bytes) as a numeric
+-- entity; anything malformed is U+FFFD.
+local function entity(seq)
+  local b, len, cp = seq:byte(1), #seq, nil
+  if b >= 194 and b <= 223 and len == 2 then cp = b - 192
+  elseif b >= 224 and b <= 239 and len == 3 then cp = b - 224
+  elseif b >= 240 and b <= 244 and len == 4 then cp = b - 240 end
+  if cp == nil then return "&#65533;" end
+  for i = 2, len do cp = cp * 64 + seq:byte(i) - 128 end
+  if cp < 128 or cp > 1114111 then return "&#65533;" end
+  return "&#" .. cp .. ";"
+end
+
+-- Fed text for markup. Non-ASCII leaves as numeric entities: MudForge hands
+-- every string from Lua to the page as Latin-1 (wayfinder #35), so only
+-- ASCII and entities arrive intact.
 function M.escape(s)
   s = tostring(s or "")
   s = (s:gsub("&", "&amp;"))
   s = (s:gsub("<", "&lt;"))
   s = (s:gsub(">", "&gt;"))
   s = (s:gsub('"', "&quot;"))
+  s = (s:gsub("[\128-\255][\128-\191]*", entity))
   return s
 end
 
