@@ -629,6 +629,13 @@ h = map.html(s)
 has(h, ">the Very Long Road</text>", "drawn")
 local vw = tonumber(h:match('viewBox="[%-%d%.]+ [%-%d%.]+ ([%d%.]+)'))
 assert(vw > 36, "the frame grows to hold it: " .. vw)
+-- MudForge's gsub returns no count (found on the #33 walk): labels must
+-- still be measured, or every one is zero wide and is cut off at the frame
+local gsub = string.gsub
+string.gsub = function(...) return (gsub(...)) end
+h = map.html(s)
+string.gsub = gsub
+eq(tonumber(h:match('viewBox="[%-%d%.]+ [%-%d%.]+ ([%d%.]+)')), vw, "the same frame without gsub's count")
 
 -- Wards: a tint and a dashed outline per Ward, hues in the sorted order of wards
 s = map.new()

@@ -381,10 +381,15 @@ local function initial(name)
 end
 
 -- A label's width in SVG units, guessed from its characters (UTF-8 lead
--- bytes counted, not bytes).
+-- bytes counted, not bytes). Counted by hand: MudForge's gsub returns no
+-- count.
 local function textW(s, fs)
-  local _, chars = s:gsub("[^\128-\191]", "")
-  return chars * fs * 0.55
+  local chars = 0
+  for i = 1, #s do
+    local b = s:byte(i)
+    if b < 128 or b > 191 then chars = chars + 1 end
+  end
+  return chars * fs * 0.6   -- a monospace face, as the widget font usually is
 end
 
 local function wardHue(s, id)
