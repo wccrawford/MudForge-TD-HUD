@@ -1,0 +1,28 @@
+<!-- Group widget: styles only. Its content is this followed by lib/group.lua's
+     html(), rewritten whole on every change (ADR 0002): one row per Group
+     member and Ally - name, Condition bar, figures, and how many effects on
+     it help (green) and harm (red), their names in the count's tooltip. -->
+<style>
+  html,body{height:100%}
+  .grp{display:flex;flex-direction:column;gap:4px;padding:2px 4px 2px 0;height:100%;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#30363d transparent}
+  .gr{display:grid;grid-template-columns:7.5em 1fr 4.4em 4.2em;align-items:center;gap:6px;flex-shrink:0}
+  .gn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .gr.you .gn{color:#e6edf3;font-weight:600}
+  .gr.ally .gn{padding-left:.9em;color:#8b949e;font-size:.92em}
+  .gr.away .gn{color:#8b949e;font-style:italic}
+  .gr.off{opacity:.5}
+  .ld::before{content:"\2605";color:#e0c060;margin-right:.25em;font-size:.85em}
+  .bar{position:relative;height:1.25em;background:#0d1117;border:1px solid #30363d;border-radius:3px;overflow:hidden}
+  .gr.ally .bar{height:1em}
+  .fill{position:absolute;top:0;bottom:0;left:0;background:var(--c,#555);transition:width .25s}
+  .word{position:absolute;inset:0;display:flex;align-items:center;padding-left:6px;font-size:.85em;color:#fff;text-shadow:0 0 3px #000,0 0 2px #000;white-space:nowrap;text-transform:lowercase}
+  .bar.empty .word{color:#6e7681;text-shadow:none;font-style:italic}
+  .num{color:#8b949e;font-size:.92em;text-align:right;font-variant-numeric:tabular-nums}
+  .fx{display:flex;gap:3px;justify-content:flex-end}
+  .good,.bad{min-width:1.9em;padding:0 3px;border-radius:3px;font-size:.85em;font-weight:600;line-height:1.35;text-align:center;font-variant-numeric:tabular-nums;cursor:default}
+  .good{color:#3fb950;background:#3fb95022;border:1px solid #3fb95055}
+  .bad{color:#f25c3c;background:#e5232b22;border:1px solid #e5232b55}
+  .good::before{content:"\25B2";font-size:.7em;margin-right:2px;vertical-align:.1em}
+  .bad::before{content:"\25BC";font-size:.7em;margin-right:2px;vertical-align:.1em}
+  .z{visibility:hidden}
+</style>

@@ -1,4 +1,4 @@
--- TextDungeon HUD: Status / Effects / Slots widgets, the Page and Quest
+-- TextDungeon HUD: Status / Effects / Slots / Group widgets, the Page and Quest
 -- readers, the Map window and the Windows bar for MudForge, fed only by TextDungeonC's GMCP
 -- Feed. This is the source; the file MudForge imports is
 -- the built textdungeon-hud.lua at the repo root (ADR 0001).
@@ -7,13 +7,14 @@ plugin = {
   name = "textdungeon-hud",
   version = "0.7.0",
   author = "wccrawford",
-  description = "TextDungeon's Status, Effects, Slots, Page, Quest and Map as MudForge widgets, fed by the GMCP Feed.",
+  description = "TextDungeon's Status, Effects, Slots, Group, Page, Quest and Map as MudForge widgets, fed by the GMCP Feed.",
   settings = { saveState = true },
 }
 
 local status = require("status")
 local effects = require("effects")
 local slots = require("slots")
+local group = require("group")
 local pages = require("pages")
 local quests = require("quests")
 local bar = require("bar")
@@ -22,8 +23,8 @@ local doc = require("doc")
 local widgets = require("widgets")   -- { status = html, ..., reader = css, bar = css }, built from src/widgets/
 
 -- Two columns docked flush to the window's left and right edges, top to
--- bottom, 4 px between widgets: the Windows bar, Slots, Effects and Status
--- on the left; the Map, Quest and Page on the right. Each column fills the
+-- bottom, 4 px between widgets: the Windows bar, Slots, Effects, Status and
+-- Group on the left; the Map, Quest and Page on the right. Each column fills the
 -- window's height: its one `fill` widget takes what the others leave (at
 -- least its `height`, which is also its height when the window size is
 -- unknown). Heights include MudForge's title bar. `bound` widgets get their
@@ -37,8 +38,9 @@ local COLUMNS = {
   { side = "left", width = 484, widgets = {
     { name = "bar", title = "Windows", height = 68 },        -- one row of buttons
     { name = "slots", title = "Slots", height = 256, bound = true, fill = true },
-    { name = "effects", title = "Effects", height = 150, bound = true },
+    { name = "effects", title = "Effects", height = 170, bound = true },
     { name = "status", title = "Status", height = 190, bound = true },
+    { name = "group", title = "Group", height = 150 },
   } },
   { side = "right", width = 576, widgets = {
     { name = "map", title = "Map", height = 380, fill = true },
@@ -49,7 +51,8 @@ local COLUMNS = {
 -- What the Windows bar opens, in bar order; never the bar itself.
 local WINDOWS = {
   { name = "status", title = "Status" }, { name = "effects", title = "Effects" },
-  { name = "slots", title = "Slots" }, { name = "quest", title = "Quest" },
+  { name = "slots", title = "Slots" }, { name = "group", title = "Group" },
+  { name = "quest", title = "Quest" },
   { name = "page", title = "Page" }, { name = "map", title = "Map" },
 }
 
@@ -60,6 +63,7 @@ local hud = {
   status = { id = nil, s = status.new() },
   effects = { id = nil, s = effects.new() },
   slots = { id = nil, s = slots.new() },
+  group = { id = nil, s = group.new() },
   page = { id = nil, s = pages.new() },
   quest = { id = nil, s = quests.new() },
   bar = { id = nil, s = bar.new(WINDOWS) },
@@ -144,6 +148,17 @@ local function renderBar()
   setWidgetProperty(hud.bar.id, "content", widgets.bar .. bar.html(hud.bar.s, fontOf("bar")))
 end
 
+-- The Group is rewritten whole too, but only when its markup changed: a
+-- Char.Vitals push that moves nothing it shows (Footing, Focus) leaves it be,
+-- so a tooltip or scroll there survives.
+local lastGroup = nil
+local function renderGroup()
+  local html = widgets.group .. group.html(hud.group.s, fontOf("group"))
+  if html == lastGroup then return end
+  lastGroup = html
+  setWidgetProperty(hud.group.id, "content", html)
+end
+
 -- The Map is rewritten whole too, on every Plane, step, Group move and
 -- level click (wayfinder #21), laid out from the view Lua holds (#35).
 local function renderMap()
@@ -162,6 +177,7 @@ local REFONT = {
   page = function() renderPage() end,
   quest = function() renderQuest() end,
   bar = function() renderBar() end,
+  group = function() renderGroup() end,
   map = function() renderMap() end,
 }
 local lastFont = {}         -- name -> the font css last applied
@@ -261,10 +277,12 @@ local function attach()
   hud.status.s = status.new()
   hud.effects.s = effects.new()
   hud.slots.s = slots.new()
+  hud.group.s = group.new()
   hud.page.s = pages.new()
   hud.quest.s = quests.new()
   hud.map.s = map.new(savedZoom())
   pushAll()
+  renderGroup()
   renderPage()
   renderQuest()
   renderMap()
@@ -329,6 +347,8 @@ function init()
     ensureTick()
     status.vitals(hud.status.s, pkg)
     pushStatus(getCurrentTime())
+    group.vitals(hud.group.s, pkg)
+    renderGroup()
   end)
   onGMCPUpdate("Char.RoundTime", function(pkg)
     ensureTick()
@@ -341,6 +361,28 @@ function init()
     local now = getCurrentTime()
     effects.effects(hud.effects.s, pkg, now)
     pushEffects(now)
+    group.effects(hud.group.s, pkg)
+    renderGroup()
+  end)
+  -- The Group's members and Allies: their effects run in the Effects
+  -- widget beside the reader's own and are counted in the Group widget.
+  onGMCPUpdate("Char.OtherEffects", function(pkg)
+    ensureTick()
+    local now = getCurrentTime()
+    effects.others(hud.effects.s, pkg, now)
+    pushEffects(now)
+    group.others(hud.group.s, pkg)
+    renderGroup()
+  end)
+  onGMCPUpdate("Char.Group", function(pkg)
+    ensureTick()
+    group.group(hud.group.s, pkg)
+    renderGroup()
+  end)
+  onGMCPUpdate("Char.Allies", function(pkg)
+    ensureTick()
+    group.allies(hud.group.s, pkg)
+    renderGroup()
   end)
   onGMCPUpdate("Char.Items", function(pkg)
     ensureTick()
@@ -393,10 +435,12 @@ function onDisconnect()
   status.sever(hud.status.s, now)
   effects.sever(hud.effects.s, now)
   slots.sever(hud.slots.s)
+  group.sever(hud.group.s)
   pages.sever(hud.page.s)
   quests.sever(hud.quest.s)
   map.sever(hud.map.s)
   pushAll()
+  renderGroup()
   renderPage()
   renderQuest()
   renderMap()

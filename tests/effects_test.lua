@@ -66,9 +66,9 @@ eq(effects.tick(s, 5600), false, "no second report")
 eq(effects.counting(s), true, "still counting the others")
 
 -- Dead-band: a jittered re-push keeps the running Countdown
-local haste = s.by_name.Haste
+local haste = s.by_name.Haste.cd
 effects.effects(s, pkg(510000, { Haste = 55040, Shield = 590000 }), 11000)   -- +40 ms, inside
-assert(s.by_name.Haste == haste, "dead-band keeps the same Countdown")
+assert(s.by_name.Haste.cd == haste, "dead-band keeps the same Countdown")
 
 -- Lengthened beyond the dead-band: re-anchor; Span is the longest ever seen
 effects.effects(s, pkg(520000, { Haste = 50000, Shield = 580000 }), 21000)   -- +5 s
@@ -99,13 +99,13 @@ k = effects.keys(s, 61000)
 eq(k.e1n, "Haste", "Haste back")
 eq(k.e1p, "100%", "fresh Span")
 
--- Pool overflow: 12 effects show 10 rows and "+2 more"
+-- Pool overflow: 18 effects show 16 rows and "+2 more"
 local many = {}
-for i = 1, 12 do many["Eff" .. (i < 10 and "0" or "") .. i] = i * 10000 end
+for i = 1, 18 do many["Eff" .. (i < 10 and "0" or "") .. i] = i * 10000 end
 effects.effects(s, pkg(600000, many), 100000)
 k = effects.keys(s, 100000)
 eq(k.e1n, "Eff01", "overflow row 1")
-eq(k.e10n, "Eff10", "overflow row 10")
+eq(k.e16n, "Eff16", "overflow row 16")
 eq(k.effMore, "+2 more", "overflow line")
 effects.effects(s, pkg(600000, { A = 1000 }), 100000)
 eq(effects.keys(s, 100000).effMore, "", "more line clears")

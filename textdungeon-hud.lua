@@ -6,7 +6,7 @@ plugin = {
   name = "textdungeon-hud",
   version = "0.7.0",
   author = "wccrawford",
-  description = "TextDungeon's Status, Effects, Slots, Page, Quest and Map as MudForge widgets, fed by the GMCP Feed.",
+  description = "TextDungeon's Status, Effects, Slots, Group, Page, Quest and Map as MudForge widgets, fed by the GMCP Feed.",
   settings = { saveState = true },
 }
 
@@ -228,60 +228,129 @@ end)()
 __libs["effects"] = (function()
   local require = __require
 -- Effects: the view-model behind the Effects widget (Active Effects as timer
--- rows, soonest first). Pure Lua 5.1 library, same shape as status.lua: the
--- wiring owns a state table from `new()`, feeds it Char.Effects snapshots and
--- the local clock, and pushes `keys()` through setBoundValues. Each effect
--- runs its own Countdown (CONTEXT.md); the markup is a fixed pool of POOL
--- rows flipped by bound values, never rebuilt (wayfinder #6).
+-- rows). Pure Lua 5.1 library, same shape as status.lua: the wiring owns a
+-- state table from `new()`, feeds it Char.Effects (the reader's own) and
+-- Char.OtherEffects (the Group's members and Allies) snapshots and the local
+-- clock, and pushes `keys()` through setBoundValues. Each effect runs its own
+-- Countdown (CONTEXT.md); the markup is a fixed pool of POOL rows flipped by
+-- bound values, never rebuilt (wayfinder #6).
+--
+-- Rows run the reader's own effects first, then each other Bearer's in the
+-- feed's order, each Bearer's soonest first. While any other Bearer has a
+-- row, every Bearer's first row carries its name above it ("You" for the
+-- reader); with only the reader's own, no names are drawn.
 local countdown = require("countdown")
 
 local M = {}
 
-M.POOL = 10                -- rows in the markup; beyond that only "+N more"
+M.POOL = 16                -- rows in the markup; beyond that only "+N more"
 M.URGENT_MS = 5000         -- time and hairline turn red under this
 -- A remaining past this is no deadline: the server ships a fight-bound
--- effect's end as u64::MAX (THIS_FIGHT_MS), which reaches Lua as 2^64.
--- `status` prints those "(this fight)"; so does the row.
+-- effect's end as u64::MAX (THIS_FIGHT_MS), which reaches Lua as 2^64, and
+-- marks it `this_fight`. `status` prints those "(this fight)"; so does the row.
 M.FIGHT_MS = 2^53
+local FIGHT_LEFT = 2^64
+
+-- The bearers of Char.OtherEffects this widget shows: the Group's members
+-- and Allies. Foes are the fight's, not the side's.
+local SHOWN = { member = true, ally = true }
 
 function M.new()
-  return { state = "unfed", by_name = {}, frozen_at = nil }
+  return { state = "unfed", by_name = {}, others = {}, frozen_at = nil }
 end
 
--- Char.Effects snapshot: `{ effects = { {name, ends_at_ms}, ... }, now_ms }`.
--- Walks the array with ipairs (feed arrays reach Lua 0-based under t[i]).
--- An Effect's Span is the longest remaining ever seen for its name while it
--- ran, so a re-push that lengthens it beyond the dead-band refills toward
--- that, not to the new remaining as a Round Time Stack would.
-function M.effects(s, pkg, now)
-  if pkg == nil then return s end
-  local next_by_name = {}
-  local now_ms = pkg.now_ms or 0
-  for _, e in ipairs(pkg.effects or {}) do
+-- One effect list anchored against the previous one: name -> entry
+-- `{cd, helps, does}`. An Effect's Span is the longest remaining ever seen
+-- for its name while it ran, so a re-push that lengthens it beyond the
+-- dead-band refills toward that, not to the new remaining as a Round Time
+-- Stack would. Walks the array with ipairs (feed arrays reach Lua 0-based
+-- under t[i]).
+local function anchor(prev_by_name, list, now_ms, now)
+  local by_name = {}
+  for _, e in ipairs(list or {}) do
     if e.name ~= nil and e.ends_at_ms ~= nil then
-      local prev = s.by_name[e.name]
-      local cd = countdown.push(prev, e.ends_at_ms - now_ms, now)
-      if cd ~= nil and prev ~= nil and cd ~= prev and prev.span > cd.span then
-        cd = { ends_at = cd.ends_at, span = prev.span }
+      local prev = prev_by_name[e.name]
+      local pcd = prev and prev.cd or nil
+      local left = e.ends_at_ms - now_ms
+      if e.this_fight == true then left = FIGHT_LEFT end
+      local cd = countdown.push(pcd, left, now)
+      if cd ~= nil and pcd ~= nil and cd ~= pcd and pcd.span > cd.span then
+        cd = { ends_at = cd.ends_at, span = pcd.span }
       end
-      if cd ~= nil then next_by_name[e.name] = cd end
+      if cd ~= nil then
+        local helps = nil
+        if e.helps == true or e.helps == false then helps = e.helps end
+        by_name[e.name] = { cd = cd, helps = helps, does = e.does }
+      end
     end
   end
-  s.by_name = next_by_name
+  return by_name
+end
+
+-- Char.Effects snapshot: `{ effects = { {name, helps?, does?, this_fight?,
+-- ends_at_ms}, ... }, now_ms }`.
+function M.effects(s, pkg, now)
+  if pkg == nil then return s end
+  s.by_name = anchor(s.by_name, pkg.effects, pkg.now_ms or 0, now)
   s.state = "live"
   return s
+end
+
+-- A Bearer's name as its rows head it: a member's own name, an Ally's with
+-- whose it is.
+local function label(b)
+  if b.kind ~= "ally" or b.owner == nil then return b.name end
+  if b.owner == "you" then return b.name .. " (yours)" end
+  return b.name .. " (" .. b.owner .. "'s)"
+end
+
+-- Char.OtherEffects snapshot: `{ bearers = { {kind, name, id, owner?,
+-- effects}, ... }, now_ms }`. A Bearer is known by kind and id, so two
+-- Allies sharing a name keep their own Countdowns.
+function M.others(s, pkg, now)
+  if pkg == nil then return s end
+  local prev = {}
+  for _, b in ipairs(s.others) do prev[b.key] = b end
+  local list = {}
+  for _, b in ipairs(pkg.bearers or {}) do
+    if SHOWN[b.kind] and b.name ~= nil then
+      local key = b.kind .. ":" .. tostring(b.id or b.name)
+      local p = prev[key]
+      list[#list + 1] = {
+        key = key,
+        label = label(b),
+        by_name = anchor(p and p.by_name or {}, b.effects, pkg.now_ms or 0, now),
+      }
+    end
+  end
+  s.others = list
+  s.state = "live"
+  return s
+end
+
+local function drain(by_name, now)
+  local cleared = false
+  for name, e in pairs(by_name) do
+    if countdown.tick(e.cd, now) == nil then
+      by_name[name] = nil
+      cleared = true
+    end
+  end
+  return cleared
+end
+
+local function any(by_name)
+  for _ in pairs(by_name) do return true end
+  return false
 end
 
 -- The local tick; returns true when any Effect just reached Clear so the
 -- caller knows its row must be pushed away.
 function M.tick(s, now)
   if s.state == "severed" then return false end
-  local cleared = false
-  for name, cd in pairs(s.by_name) do
-    if countdown.tick(cd, now) == nil then
-      s.by_name[name] = nil
-      cleared = true
-    end
+  local cleared = drain(s.by_name, now)
+  for _, b in ipairs(s.others) do
+    if drain(b.by_name, now) then cleared = true end
   end
   return cleared
 end
@@ -289,7 +358,10 @@ end
 -- True while any Effect is running, i.e. the tick has rows to drain.
 -- (`next` is not in MudForge's sandbox; pairs is.)
 function M.counting(s)
-  for _ in pairs(s.by_name) do return true end
+  if any(s.by_name) then return true end
+  for _, b in ipairs(s.others) do
+    if any(b.by_name) then return true end
+  end
   return false
 end
 
@@ -302,12 +374,13 @@ function M.sever(s, now)
   return s
 end
 
--- Running Effects soonest first (name breaks ties so the order is stable).
-local function sorted(s, now)
+-- One Bearer's running Effects soonest first (name breaks ties so the order
+-- is stable).
+local function sorted(by_name, now)
   local list = {}
-  for name, cd in pairs(s.by_name) do
-    if countdown.tick(cd, now) ~= nil then
-      list[#list + 1] = { name = name, cd = cd }
+  for name, e in pairs(by_name) do
+    if countdown.tick(e.cd, now) ~= nil then
+      list[#list + 1] = { name = name, cd = e.cd, helps = e.helps, does = e.does }
     end
   end
   table.sort(list, function(a, b)
@@ -317,19 +390,58 @@ local function sorted(s, now)
   return list
 end
 
+-- What an effect does, as its row's tooltip: "Helps: raises your
+-- resistance to fire", "Harms", or "".
+local function tip(e)
+  local sign = ""
+  if e.helps == true then sign = "Helps" elseif e.helps == false then sign = "Harms" end
+  if e.does == nil or e.does == "" then return sign end
+  if sign == "" then return e.does end
+  return sign .. ": " .. e.does
+end
+
+local function helpsKey(helps)
+  if helps == true then return "1" elseif helps == false then return "0" end
+  return ""
+end
+
+-- Every row in order: { bearer label or nil, effect }.
+local function rows(s, now)
+  local out = {}
+  local others = {}
+  for _, b in ipairs(s.others) do
+    local list = sorted(b.by_name, now)
+    if #list > 0 then others[#others + 1] = { label = b.label, list = list } end
+  end
+  local named = #others > 0
+  for i, e in ipairs(sorted(s.by_name, now)) do
+    out[#out + 1] = { bearer = (named and i == 1) and "You" or nil, e = e }
+  end
+  for _, b in ipairs(others) do
+    for i, e in ipairs(b.list) do
+      out[#out + 1] = { bearer = (i == 1) and b.label or nil, e = e }
+    end
+  end
+  return out
+end
+
 -- The complete bound-value key set for the Effects widget's markup:
--- hudState, effEmpty, effMore, and e<i>n / e<i>t / e<i>u / e<i>p / e<i>d
--- (name, mm:ss, urgency flag, hairline width, row display) for each pool row.
+-- hudState, effEmpty, effMore, and per pool row e<i>n / e<i>t / e<i>u /
+-- e<i>p / e<i>d (name, mm:ss, urgency flag, hairline width, row display),
+-- e<i>h / e<i>w (helps "1", harms "0" or unknown "", and the tooltip saying
+-- what it does) and e<i>b / e<i>bd (the Bearer's name over its first row,
+-- and that line's display).
 function M.keys(s, now)
   if s.state == "severed" and s.frozen_at ~= nil then now = s.frozen_at end
   local k = { hudState = s.state }
-  local list = sorted(s, now)
+  local list = rows(s, now)
   k.effEmpty = (s.state ~= "unfed" and #list == 0) and "" or "none"
   k.effMore = (#list > M.POOL) and ("+" .. (#list - M.POOL) .. " more") or ""
   for i = 1, M.POOL do
     local p = "e" .. i
-    local e = list[i]
-    if e ~= nil then
+    local r = list[i]
+    if r ~= nil then
+      local e = r.e
       local left = countdown.remaining(e.cd, now)
       local fight = left >= M.FIGHT_MS
       k[p .. "n"] = e.name
@@ -337,12 +449,20 @@ function M.keys(s, now)
       k[p .. "u"] = (left < M.URGENT_MS) and 1 or 0
       k[p .. "p"] = fight and "100%" or (countdown.pct(e.cd, now) .. "%")
       k[p .. "d"] = ""
+      k[p .. "h"] = helpsKey(e.helps)
+      k[p .. "w"] = tip(e)
+      k[p .. "b"] = r.bearer or ""
+      k[p .. "bd"] = r.bearer and "" or "none"
     else
       k[p .. "n"] = ""
       k[p .. "t"] = ""
       k[p .. "u"] = 0
       k[p .. "p"] = "0%"
       k[p .. "d"] = "none"
+      k[p .. "h"] = ""
+      k[p .. "w"] = ""
+      k[p .. "b"] = ""
+      k[p .. "bd"] = "none"
     end
   end
   return k
@@ -688,6 +808,258 @@ end
 -- The body of a widget with nothing to show yet.
 function M.empty(text)
   return '<div class="none">' .. M.escape(text) .. "</div>"
+end
+
+return M
+end)()
+
+-- lib/group.lua
+__libs["group"] = (function()
+  local require = __require
+-- Group: the view-model behind the Group widget - one row per member of
+-- the reader's Group and per Ally of it (summons and Mercenaries), each with
+-- its Condition as a bar and figures and a count of the effects on it that
+-- help and that harm. Pure Lua 5.1 library: the wiring feeds it
+-- Char.Vitals (the reader's own Condition), Char.Group, Char.Allies,
+-- Char.Effects (the reader's own effects) and Char.OtherEffects, and
+-- rewrites the widget whole from html() (ADR 0002); nothing here counts
+-- down, so the server's re-push when an effect ends is what moves a count.
+--
+-- Rows: the reader first, then the reader's Allies under them, then each
+-- other member in roster (join) order with their Allies under them; an
+-- Ally whose owner is no row's is listed last. Out of a Group the reader's
+-- row and their own Allies are the whole list.
+local doc = require("doc")
+
+local M = {}
+
+function M.new()
+  return { state = "unfed", me = nil, roster = {}, allies = {}, own = nil, others = {} }
+end
+
+local function live(s)
+  s.state = "live"
+  return s
+end
+
+-- Char.Vitals: only the reader's Condition is read here.
+function M.vitals(s, pkg)
+  if pkg == nil then return s end
+  s.me = pkg.condition
+  return live(s)
+end
+
+-- Char.Group: a bare array of members (ipairs at the door: feed arrays
+-- reach Lua 0-based under t[i]).
+function M.group(s, pkg)
+  if pkg == nil then return s end
+  local list = {}
+  for _, m in ipairs(pkg) do
+    if type(m) == "table" and m.name ~= nil then list[#list + 1] = m end
+  end
+  s.roster = list
+  return live(s)
+end
+
+-- Char.Allies: a bare array of Allies, each with its owner.
+function M.allies(s, pkg)
+  if pkg == nil then return s end
+  local list = {}
+  for _, a in ipairs(pkg) do
+    if type(a) == "table" and a.name ~= nil then list[#list + 1] = a end
+  end
+  s.allies = list
+  return live(s)
+end
+
+-- One effect list as counts: `{good, bad, goodTip, badTip}`, each tip the
+-- effects' names. An effect with no `helps` counts as neither.
+local function count(effects)
+  local c = { good = 0, bad = 0 }
+  local good, bad = {}, {}
+  for _, e in ipairs(effects or {}) do
+    if type(e) == "table" and e.name ~= nil then
+      if e.helps == true then good[#good + 1] = e.name
+      elseif e.helps == false then bad[#bad + 1] = e.name end
+    end
+  end
+  c.good, c.bad = #good, #bad
+  c.goodTip = table.concat(good, ", ")
+  c.badTip = table.concat(bad, ", ")
+  return c
+end
+
+-- Char.Effects: the reader's own.
+function M.effects(s, pkg)
+  if pkg == nil then return s end
+  s.own = count(pkg.effects)
+  return live(s)
+end
+
+-- A Bearer's key: its kind and identity, as Char.OtherEffects and the
+-- Group and Allies rows carry them (the name where no id rides).
+local function key(kind, row)
+  return kind .. ":" .. tostring(row.id or row.name)
+end
+
+-- Char.OtherEffects: `{bearers = {{kind, name, id, effects}, ...}}`.
+function M.others(s, pkg)
+  if pkg == nil then return s end
+  local by = {}
+  for _, b in ipairs(pkg.bearers or {}) do
+    if type(b) == "table" and b.name ~= nil and b.kind ~= nil then
+      by[key(b.kind, b)] = count(b.effects)
+    end
+  end
+  s.others = by
+  return live(s)
+end
+
+-- Connection lost: keep the rows as they stood.
+function M.sever(s)
+  if s.state == "live" then s.state = "severed" end
+  return s
+end
+
+local function plural(n, one, many)
+  if n == 1 then return "one " .. one end
+  return tostring(n) .. " " .. many
+end
+
+-- Where a member is, as `group` words it, for the row's tooltip.
+local function whereText(m)
+  local w = m.where
+  if w == "here" then return "here" end
+  if w == "away" then
+    local moves = tonumber(m.moves)
+    local far = moves and plural(moves, "room", "rooms") .. " away" or "away"
+    if m.exit ~= nil then return m.exit .. ", " .. far end
+    return far
+  end
+  if w == "out_of_reach" then return "out of reach" end
+  if w == "inside" then
+    if m.delve ~= nil then return "inside " .. m.delve end
+    return "inside"
+  end
+  if w == nil then return "" end
+  return w
+end
+
+local NONE = { good = 0, bad = 0, goodTip = "", badTip = "" }
+
+local function allyRow(s, a, owner)
+  return {
+    name = a.name, ally = true, cond = a.condition,
+    tip = owner and (a.name .. ", " .. owner) or a.name,
+    fx = s.others[key("ally", a)] or NONE,
+  }
+end
+
+-- Every row in order, as plain tables (what html() draws):
+-- { name, tip, you?, leader?, ally?, offline?, cond?, fx = {good, bad, goodTip, badTip} }
+function M.rows(s)
+  local rows = {}
+  local mine, byOwner, owners = {}, {}, {}
+  for _, a in ipairs(s.allies) do
+    if a.owner == "you" then mine[#mine + 1] = a
+    else
+      local o = a.owner or ""
+      if byOwner[o] == nil then byOwner[o] = {} end
+      byOwner[o][#byOwner[o] + 1] = a
+    end
+  end
+  local meRow = nil
+  for _, m in ipairs(s.roster) do
+    if m.you then meRow = m end
+  end
+  rows[#rows + 1] = {
+    name = "You", you = true, leader = meRow ~= nil and meRow.leader == true,
+    tip = meRow and meRow.name or "You", cond = s.me, fx = s.own or NONE,
+  }
+  for _, a in ipairs(mine) do rows[#rows + 1] = allyRow(s, a, "yours") end
+  for _, m in ipairs(s.roster) do
+    if not m.you then
+      owners[m.name] = true
+      local where = whereText(m)
+      rows[#rows + 1] = {
+        name = m.name, leader = m.leader == true, offline = m.where == "offline",
+        tip = (where ~= "" and where ~= "here") and (m.name .. ": " .. where) or m.name,
+        where = m.where, cond = m.condition, fx = s.others[key("member", m)] or NONE,
+      }
+      for _, a in ipairs(byOwner[m.name] or {}) do
+        rows[#rows + 1] = allyRow(s, a, m.name .. "'s")
+      end
+    end
+  end
+  -- An Ally whose owner has no row (the roster not yet fed): listed last.
+  for _, a in ipairs(s.allies) do
+    if a.owner ~= "you" and not owners[a.owner or ""] then
+      rows[#rows + 1] = allyRow(s, a, a.owner and (a.owner .. "'s") or nil)
+    end
+  end
+  return rows
+end
+
+local function pct(cur, max)
+  cur, max = tonumber(cur), tonumber(max)
+  if cur == nil or max == nil or max <= 0 then return 0 end
+  local p = cur / max * 100
+  if p < 0 then p = 0 elseif p > 100 then p = 100 end
+  return math.floor(p * 10 + 0.5) / 10
+end
+
+-- Condition's ladder is the five-rung tier ramp (shared.css), 1 best.
+local function tier(c)
+  local t = tonumber(c.tier)
+  if t == nil then return "" end
+  if t < 1 then t = 1 elseif t > 5 then t = 5 end
+  return tostring(math.floor(t))
+end
+
+local function attr(name, value)
+  if value == nil or value == "" then return "" end
+  return " " .. name .. '="' .. doc.escape(value) .. '"'
+end
+
+local function figures(c)
+  if c == nil or c.cur == nil then return "" end
+  if c.max == nil then return tostring(c.cur) end
+  return tostring(c.cur) .. "/" .. tostring(c.max)
+end
+
+-- One count: hidden at zero, so a row with nothing on it reads clean.
+local function pill(cls, n, tip)
+  if n == 0 then return '<span class="' .. cls .. ' z"></span>' end
+  return '<span class="' .. cls .. '"' .. attr("title", tip) .. ">" .. n .. "</span>"
+end
+
+local function row(r)
+  local cls = "gr" .. (r.ally and " ally" or "") .. (r.you and " you" or "") .. (r.offline and " off" or "")
+    .. ((r.where ~= nil and r.where ~= "here" and not r.offline) and " away" or "")
+  local name = '<span class="gn"' .. attr("title", r.tip) .. ">"
+    .. (r.leader and '<span class="ld" title="Leader"></span>' or "")
+    .. doc.escape(r.name) .. "</span>"
+  local bar
+  if r.cond ~= nil then
+    bar = '<div class="bar"' .. attr("title", figures(r.cond)) .. '><div class="fill" data-tier="' .. tier(r.cond)
+      .. '" style="width:' .. pct(r.cond.cur, r.cond.max) .. '%"></div><span class="word">'
+      .. doc.escape(r.cond.name or "") .. "</span></div>"
+  else
+    bar = '<div class="bar empty"><span class="word">' .. (r.offline and "offline" or "") .. "</span></div>"
+  end
+  local fx = r.fx or NONE
+  return '<div class="' .. cls .. '">' .. name .. bar
+    .. '<span class="num">' .. doc.escape(figures(r.cond)) .. "</span>"
+    .. '<span class="fx">' .. pill("good", fx.good, fx.goodTip) .. pill("bad", fx.bad, fx.badTip) .. "</span>"
+    .. "</div>"
+end
+
+-- The widget's whole content, in `font` (the widget's own, see doc.fontStyle).
+function M.html(s, font)
+  local out = {}
+  for _, r in ipairs(M.rows(s)) do out[#out + 1] = row(r) end
+  return '<div class="hud grp" data-state="' .. s.state .. '"' .. doc.fontStyle(font) .. ">"
+    .. table.concat(out) .. "</div>"
 end
 
 return M
@@ -2088,16 +2460,23 @@ html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25
 [data-urg="0"]{--u:#58a6ff}[data-urg="1"]{--u:#e5232b}
 </style>
 <!-- Effects widget: variant A "Timer rows" from wayfinder #6. Content is set once;
-     the list is a fixed pool of 10 rows flipped by bound keys from lib/effects.lua's
-     keys() — a row past the pool shows only as "+N more". Defaults are the Unfed
-     skeleton: every row hidden, the "No effects" line too. -->
+     the list is a fixed pool of 16 rows flipped by bound keys from lib/effects.lua's
+     keys() - a row past the pool shows only as "+N more". The reader's own rows come
+     first, then each Group member's and Ally's, each Bearer's first row carrying its
+     name above it while anyone else's show. A dot says whether it helps (green) or
+     harms (red); the tooltip says what it does. Defaults are the Unfed skeleton:
+     every row hidden, the "No effects" line too. -->
 <style>
   /* the pool can outgrow the widget: scroll it rather than clip "+N more" */
   html,body{height:100%}
   .hud{display:flex;flex-direction:column;gap:5px;padding:2px 4px 2px 0;height:100%;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#30363d transparent}
   .e,.empty{flex-shrink:0}
   .e{display:flex;flex-direction:column;gap:2px}
-  .e .l{display:grid;grid-template-columns:1fr auto;align-items:baseline;gap:8px}
+  .e .b{color:#8b949e;font-size:.85em;padding:3px 0 1px;border-bottom:1px solid #21262d;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .empty+.e .b{padding-top:0}
+  .e .l{display:grid;grid-template-columns:auto 1fr auto;align-items:baseline;gap:6px}
+  .e .d{width:.5em;height:.5em;border-radius:50%;background:var(--g,transparent);align-self:center}
+  .e .d[data-helps="1"]{--g:#3fb950}.e .d[data-helps="0"]{--g:#e5232b}
   .e .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .e .t{color:var(--u);font-size:.92em;font-weight:600;font-variant-numeric:tabular-nums}
   .e .h{height:3px;background:#30363d;border-radius:2px;overflow:hidden}
@@ -2107,44 +2486,84 @@ html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25
 <div class="hud hud-effects" data-state="unfed" data-mud-bind-attr="data-state:hudState" data-mud-bind-style="font-size:fontSize;font-family:fontFamily;font-weight:fontWeight">
   <div class="empty" style="display:none" data-mud-bind-style="display:effEmpty">No effects</div>
   <div class="e" style="display:none" data-mud-bind-attr="data-urg:e1u" data-mud-bind-style="display:e1d">
-    <div class="l"><span class="n" data-mud-bind="e1n"></span><span class="t" data-mud-bind="e1t"></span></div>
+    <div class="b" style="display:none" data-mud-bind="e1b" data-mud-bind-style="display:e1bd"></div>
+    <div class="l" data-mud-bind-attr="title:e1w"><span class="d" data-mud-bind-attr="data-helps:e1h"></span><span class="n" data-mud-bind="e1n"></span><span class="t" data-mud-bind="e1t"></span></div>
     <div class="h"><div data-mud-bind-style="width:e1p"></div></div>
   </div>
   <div class="e" style="display:none" data-mud-bind-attr="data-urg:e2u" data-mud-bind-style="display:e2d">
-    <div class="l"><span class="n" data-mud-bind="e2n"></span><span class="t" data-mud-bind="e2t"></span></div>
+    <div class="b" style="display:none" data-mud-bind="e2b" data-mud-bind-style="display:e2bd"></div>
+    <div class="l" data-mud-bind-attr="title:e2w"><span class="d" data-mud-bind-attr="data-helps:e2h"></span><span class="n" data-mud-bind="e2n"></span><span class="t" data-mud-bind="e2t"></span></div>
     <div class="h"><div data-mud-bind-style="width:e2p"></div></div>
   </div>
   <div class="e" style="display:none" data-mud-bind-attr="data-urg:e3u" data-mud-bind-style="display:e3d">
-    <div class="l"><span class="n" data-mud-bind="e3n"></span><span class="t" data-mud-bind="e3t"></span></div>
+    <div class="b" style="display:none" data-mud-bind="e3b" data-mud-bind-style="display:e3bd"></div>
+    <div class="l" data-mud-bind-attr="title:e3w"><span class="d" data-mud-bind-attr="data-helps:e3h"></span><span class="n" data-mud-bind="e3n"></span><span class="t" data-mud-bind="e3t"></span></div>
     <div class="h"><div data-mud-bind-style="width:e3p"></div></div>
   </div>
   <div class="e" style="display:none" data-mud-bind-attr="data-urg:e4u" data-mud-bind-style="display:e4d">
-    <div class="l"><span class="n" data-mud-bind="e4n"></span><span class="t" data-mud-bind="e4t"></span></div>
+    <div class="b" style="display:none" data-mud-bind="e4b" data-mud-bind-style="display:e4bd"></div>
+    <div class="l" data-mud-bind-attr="title:e4w"><span class="d" data-mud-bind-attr="data-helps:e4h"></span><span class="n" data-mud-bind="e4n"></span><span class="t" data-mud-bind="e4t"></span></div>
     <div class="h"><div data-mud-bind-style="width:e4p"></div></div>
   </div>
   <div class="e" style="display:none" data-mud-bind-attr="data-urg:e5u" data-mud-bind-style="display:e5d">
-    <div class="l"><span class="n" data-mud-bind="e5n"></span><span class="t" data-mud-bind="e5t"></span></div>
+    <div class="b" style="display:none" data-mud-bind="e5b" data-mud-bind-style="display:e5bd"></div>
+    <div class="l" data-mud-bind-attr="title:e5w"><span class="d" data-mud-bind-attr="data-helps:e5h"></span><span class="n" data-mud-bind="e5n"></span><span class="t" data-mud-bind="e5t"></span></div>
     <div class="h"><div data-mud-bind-style="width:e5p"></div></div>
   </div>
   <div class="e" style="display:none" data-mud-bind-attr="data-urg:e6u" data-mud-bind-style="display:e6d">
-    <div class="l"><span class="n" data-mud-bind="e6n"></span><span class="t" data-mud-bind="e6t"></span></div>
+    <div class="b" style="display:none" data-mud-bind="e6b" data-mud-bind-style="display:e6bd"></div>
+    <div class="l" data-mud-bind-attr="title:e6w"><span class="d" data-mud-bind-attr="data-helps:e6h"></span><span class="n" data-mud-bind="e6n"></span><span class="t" data-mud-bind="e6t"></span></div>
     <div class="h"><div data-mud-bind-style="width:e6p"></div></div>
   </div>
   <div class="e" style="display:none" data-mud-bind-attr="data-urg:e7u" data-mud-bind-style="display:e7d">
-    <div class="l"><span class="n" data-mud-bind="e7n"></span><span class="t" data-mud-bind="e7t"></span></div>
+    <div class="b" style="display:none" data-mud-bind="e7b" data-mud-bind-style="display:e7bd"></div>
+    <div class="l" data-mud-bind-attr="title:e7w"><span class="d" data-mud-bind-attr="data-helps:e7h"></span><span class="n" data-mud-bind="e7n"></span><span class="t" data-mud-bind="e7t"></span></div>
     <div class="h"><div data-mud-bind-style="width:e7p"></div></div>
   </div>
   <div class="e" style="display:none" data-mud-bind-attr="data-urg:e8u" data-mud-bind-style="display:e8d">
-    <div class="l"><span class="n" data-mud-bind="e8n"></span><span class="t" data-mud-bind="e8t"></span></div>
+    <div class="b" style="display:none" data-mud-bind="e8b" data-mud-bind-style="display:e8bd"></div>
+    <div class="l" data-mud-bind-attr="title:e8w"><span class="d" data-mud-bind-attr="data-helps:e8h"></span><span class="n" data-mud-bind="e8n"></span><span class="t" data-mud-bind="e8t"></span></div>
     <div class="h"><div data-mud-bind-style="width:e8p"></div></div>
   </div>
   <div class="e" style="display:none" data-mud-bind-attr="data-urg:e9u" data-mud-bind-style="display:e9d">
-    <div class="l"><span class="n" data-mud-bind="e9n"></span><span class="t" data-mud-bind="e9t"></span></div>
+    <div class="b" style="display:none" data-mud-bind="e9b" data-mud-bind-style="display:e9bd"></div>
+    <div class="l" data-mud-bind-attr="title:e9w"><span class="d" data-mud-bind-attr="data-helps:e9h"></span><span class="n" data-mud-bind="e9n"></span><span class="t" data-mud-bind="e9t"></span></div>
     <div class="h"><div data-mud-bind-style="width:e9p"></div></div>
   </div>
   <div class="e" style="display:none" data-mud-bind-attr="data-urg:e10u" data-mud-bind-style="display:e10d">
-    <div class="l"><span class="n" data-mud-bind="e10n"></span><span class="t" data-mud-bind="e10t"></span></div>
+    <div class="b" style="display:none" data-mud-bind="e10b" data-mud-bind-style="display:e10bd"></div>
+    <div class="l" data-mud-bind-attr="title:e10w"><span class="d" data-mud-bind-attr="data-helps:e10h"></span><span class="n" data-mud-bind="e10n"></span><span class="t" data-mud-bind="e10t"></span></div>
     <div class="h"><div data-mud-bind-style="width:e10p"></div></div>
+  </div>
+  <div class="e" style="display:none" data-mud-bind-attr="data-urg:e11u" data-mud-bind-style="display:e11d">
+    <div class="b" style="display:none" data-mud-bind="e11b" data-mud-bind-style="display:e11bd"></div>
+    <div class="l" data-mud-bind-attr="title:e11w"><span class="d" data-mud-bind-attr="data-helps:e11h"></span><span class="n" data-mud-bind="e11n"></span><span class="t" data-mud-bind="e11t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e11p"></div></div>
+  </div>
+  <div class="e" style="display:none" data-mud-bind-attr="data-urg:e12u" data-mud-bind-style="display:e12d">
+    <div class="b" style="display:none" data-mud-bind="e12b" data-mud-bind-style="display:e12bd"></div>
+    <div class="l" data-mud-bind-attr="title:e12w"><span class="d" data-mud-bind-attr="data-helps:e12h"></span><span class="n" data-mud-bind="e12n"></span><span class="t" data-mud-bind="e12t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e12p"></div></div>
+  </div>
+  <div class="e" style="display:none" data-mud-bind-attr="data-urg:e13u" data-mud-bind-style="display:e13d">
+    <div class="b" style="display:none" data-mud-bind="e13b" data-mud-bind-style="display:e13bd"></div>
+    <div class="l" data-mud-bind-attr="title:e13w"><span class="d" data-mud-bind-attr="data-helps:e13h"></span><span class="n" data-mud-bind="e13n"></span><span class="t" data-mud-bind="e13t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e13p"></div></div>
+  </div>
+  <div class="e" style="display:none" data-mud-bind-attr="data-urg:e14u" data-mud-bind-style="display:e14d">
+    <div class="b" style="display:none" data-mud-bind="e14b" data-mud-bind-style="display:e14bd"></div>
+    <div class="l" data-mud-bind-attr="title:e14w"><span class="d" data-mud-bind-attr="data-helps:e14h"></span><span class="n" data-mud-bind="e14n"></span><span class="t" data-mud-bind="e14t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e14p"></div></div>
+  </div>
+  <div class="e" style="display:none" data-mud-bind-attr="data-urg:e15u" data-mud-bind-style="display:e15d">
+    <div class="b" style="display:none" data-mud-bind="e15b" data-mud-bind-style="display:e15bd"></div>
+    <div class="l" data-mud-bind-attr="title:e15w"><span class="d" data-mud-bind-attr="data-helps:e15h"></span><span class="n" data-mud-bind="e15n"></span><span class="t" data-mud-bind="e15t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e15p"></div></div>
+  </div>
+  <div class="e" style="display:none" data-mud-bind-attr="data-urg:e16u" data-mud-bind-style="display:e16d">
+    <div class="b" style="display:none" data-mud-bind="e16b" data-mud-bind-style="display:e16bd"></div>
+    <div class="l" data-mud-bind-attr="title:e16w"><span class="d" data-mud-bind-attr="data-helps:e16h"></span><span class="n" data-mud-bind="e16n"></span><span class="t" data-mud-bind="e16t"></span></div>
+    <div class="h"><div data-mud-bind-style="width:e16p"></div></div>
   </div>
   <div class="empty" data-mud-bind="effMore"></div>
 </div>
@@ -2203,6 +2622,53 @@ html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25
   <div class="s" style="display:none" data-mud-bind-attr="data-empty:s16e" data-mud-bind-style="display:s16d"><span class="l" data-mud-bind="s16l"></span><span class="i" data-mud-bind="s16i"></span></div>
   <div class="empty" data-mud-bind="slotsMore"></div>
 </div>
+]==],
+  ["group"] = [==[
+<style>
+/* Inlined into every widget by tools/build.js as a <style> block ahead of its html. */
+/* the size, family and weight are the widget's own font (its settings cog), set on
+   the root by the wiring from getWidgetFont; everything inside sizes in em from it */
+html,body{margin:0;padding:0;background:transparent;color:#c9d1d9;font:13px/1.25 "Segoe UI",system-ui,sans-serif;overflow:hidden}
+*{box-sizing:border-box}
+/* tier ramp: 1 best … 5 worst (Condition / Footing / Stamina / Focus), red-first like the built-in gauge;
+   Footing's two rungs above its mark, over1 … over2 rising; power 1 strongest … 4 slightest */
+[data-tier="over2"]{--c:#2dd4bf}[data-tier="over1"]{--c:#34c58a}[data-tier="1"]{--c:#3fb950}[data-tier="2"]{--c:#d4c33a}[data-tier="3"]{--c:#f0883e}[data-tier="4"]{--c:#f25c3c}[data-tier="5"]{--c:#e5232b}
+[data-ptier="1"]{--p:#c084fc}[data-ptier="2"]{--p:#a78bfa}[data-ptier="3"]{--p:#8b7cf6}[data-ptier="4"]{--p:#6e6ad6}
+.rtc{--rt:#58a6ff}
+/* widget states (CONTEXT.md): Unfed and Severed share one dimmed treatment; Live is full strength */
+.hud{transition:opacity .2s}
+.hud[data-state="unfed"],.hud[data-state="severed"]{opacity:.45}
+/* Countdown urgency (Effects): 0 normal, 1 under 5 s */
+[data-urg="0"]{--u:#58a6ff}[data-urg="1"]{--u:#e5232b}
+</style>
+<!-- Group widget: styles only. Its content is this followed by lib/group.lua's
+     html(), rewritten whole on every change (ADR 0002): one row per Group
+     member and Ally - name, Condition bar, figures, and how many effects on
+     it help (green) and harm (red), their names in the count's tooltip. -->
+<style>
+  html,body{height:100%}
+  .grp{display:flex;flex-direction:column;gap:4px;padding:2px 4px 2px 0;height:100%;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#30363d transparent}
+  .gr{display:grid;grid-template-columns:7.5em 1fr 4.4em 4.2em;align-items:center;gap:6px;flex-shrink:0}
+  .gn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .gr.you .gn{color:#e6edf3;font-weight:600}
+  .gr.ally .gn{padding-left:.9em;color:#8b949e;font-size:.92em}
+  .gr.away .gn{color:#8b949e;font-style:italic}
+  .gr.off{opacity:.5}
+  .ld::before{content:"\2605";color:#e0c060;margin-right:.25em;font-size:.85em}
+  .bar{position:relative;height:1.25em;background:#0d1117;border:1px solid #30363d;border-radius:3px;overflow:hidden}
+  .gr.ally .bar{height:1em}
+  .fill{position:absolute;top:0;bottom:0;left:0;background:var(--c,#555);transition:width .25s}
+  .word{position:absolute;inset:0;display:flex;align-items:center;padding-left:6px;font-size:.85em;color:#fff;text-shadow:0 0 3px #000,0 0 2px #000;white-space:nowrap;text-transform:lowercase}
+  .bar.empty .word{color:#6e7681;text-shadow:none;font-style:italic}
+  .num{color:#8b949e;font-size:.92em;text-align:right;font-variant-numeric:tabular-nums}
+  .fx{display:flex;gap:3px;justify-content:flex-end}
+  .good,.bad{min-width:1.9em;padding:0 3px;border-radius:3px;font-size:.85em;font-weight:600;line-height:1.35;text-align:center;font-variant-numeric:tabular-nums;cursor:default}
+  .good{color:#3fb950;background:#3fb95022;border:1px solid #3fb95055}
+  .bad{color:#f25c3c;background:#e5232b22;border:1px solid #e5232b55}
+  .good::before{content:"\25B2";font-size:.7em;margin-right:2px;vertical-align:.1em}
+  .bad::before{content:"\25BC";font-size:.7em;margin-right:2px;vertical-align:.1em}
+  .z{visibility:hidden}
+</style>
 ]==],
   ["reader"] = [==[
 <style>
@@ -2476,7 +2942,7 @@ function mapView(V) {
 local require = __require
 
 -- src/textdungeon-hud.lua
--- TextDungeon HUD: Status / Effects / Slots widgets, the Page and Quest
+-- TextDungeon HUD: Status / Effects / Slots / Group widgets, the Page and Quest
 -- readers, the Map window and the Windows bar for MudForge, fed only by TextDungeonC's GMCP
 -- Feed. This is the source; the file MudForge imports is
 -- the built textdungeon-hud.lua at the repo root (ADR 0001).
@@ -2484,6 +2950,7 @@ local require = __require
 local status = require("status")
 local effects = require("effects")
 local slots = require("slots")
+local group = require("group")
 local pages = require("pages")
 local quests = require("quests")
 local bar = require("bar")
@@ -2492,8 +2959,8 @@ local doc = require("doc")
 local widgets = require("widgets")   -- { status = html, ..., reader = css, bar = css }, built from src/widgets/
 
 -- Two columns docked flush to the window's left and right edges, top to
--- bottom, 4 px between widgets: the Windows bar, Slots, Effects and Status
--- on the left; the Map, Quest and Page on the right. Each column fills the
+-- bottom, 4 px between widgets: the Windows bar, Slots, Effects, Status and
+-- Group on the left; the Map, Quest and Page on the right. Each column fills the
 -- window's height: its one `fill` widget takes what the others leave (at
 -- least its `height`, which is also its height when the window size is
 -- unknown). Heights include MudForge's title bar. `bound` widgets get their
@@ -2507,8 +2974,9 @@ local COLUMNS = {
   { side = "left", width = 484, widgets = {
     { name = "bar", title = "Windows", height = 68 },        -- one row of buttons
     { name = "slots", title = "Slots", height = 256, bound = true, fill = true },
-    { name = "effects", title = "Effects", height = 150, bound = true },
+    { name = "effects", title = "Effects", height = 170, bound = true },
     { name = "status", title = "Status", height = 190, bound = true },
+    { name = "group", title = "Group", height = 150 },
   } },
   { side = "right", width = 576, widgets = {
     { name = "map", title = "Map", height = 380, fill = true },
@@ -2519,7 +2987,8 @@ local COLUMNS = {
 -- What the Windows bar opens, in bar order; never the bar itself.
 local WINDOWS = {
   { name = "status", title = "Status" }, { name = "effects", title = "Effects" },
-  { name = "slots", title = "Slots" }, { name = "quest", title = "Quest" },
+  { name = "slots", title = "Slots" }, { name = "group", title = "Group" },
+  { name = "quest", title = "Quest" },
   { name = "page", title = "Page" }, { name = "map", title = "Map" },
 }
 
@@ -2530,6 +2999,7 @@ local hud = {
   status = { id = nil, s = status.new() },
   effects = { id = nil, s = effects.new() },
   slots = { id = nil, s = slots.new() },
+  group = { id = nil, s = group.new() },
   page = { id = nil, s = pages.new() },
   quest = { id = nil, s = quests.new() },
   bar = { id = nil, s = bar.new(WINDOWS) },
@@ -2614,6 +3084,17 @@ local function renderBar()
   setWidgetProperty(hud.bar.id, "content", widgets.bar .. bar.html(hud.bar.s, fontOf("bar")))
 end
 
+-- The Group is rewritten whole too, but only when its markup changed: a
+-- Char.Vitals push that moves nothing it shows (Footing, Focus) leaves it be,
+-- so a tooltip or scroll there survives.
+local lastGroup = nil
+local function renderGroup()
+  local html = widgets.group .. group.html(hud.group.s, fontOf("group"))
+  if html == lastGroup then return end
+  lastGroup = html
+  setWidgetProperty(hud.group.id, "content", html)
+end
+
 -- The Map is rewritten whole too, on every Plane, step, Group move and
 -- level click (wayfinder #21), laid out from the view Lua holds (#35).
 local function renderMap()
@@ -2632,6 +3113,7 @@ local REFONT = {
   page = function() renderPage() end,
   quest = function() renderQuest() end,
   bar = function() renderBar() end,
+  group = function() renderGroup() end,
   map = function() renderMap() end,
 }
 local lastFont = {}         -- name -> the font css last applied
@@ -2731,10 +3213,12 @@ local function attach()
   hud.status.s = status.new()
   hud.effects.s = effects.new()
   hud.slots.s = slots.new()
+  hud.group.s = group.new()
   hud.page.s = pages.new()
   hud.quest.s = quests.new()
   hud.map.s = map.new(savedZoom())
   pushAll()
+  renderGroup()
   renderPage()
   renderQuest()
   renderMap()
@@ -2799,6 +3283,8 @@ function init()
     ensureTick()
     status.vitals(hud.status.s, pkg)
     pushStatus(getCurrentTime())
+    group.vitals(hud.group.s, pkg)
+    renderGroup()
   end)
   onGMCPUpdate("Char.RoundTime", function(pkg)
     ensureTick()
@@ -2811,6 +3297,28 @@ function init()
     local now = getCurrentTime()
     effects.effects(hud.effects.s, pkg, now)
     pushEffects(now)
+    group.effects(hud.group.s, pkg)
+    renderGroup()
+  end)
+  -- The Group's members and Allies: their effects run in the Effects
+  -- widget beside the reader's own and are counted in the Group widget.
+  onGMCPUpdate("Char.OtherEffects", function(pkg)
+    ensureTick()
+    local now = getCurrentTime()
+    effects.others(hud.effects.s, pkg, now)
+    pushEffects(now)
+    group.others(hud.group.s, pkg)
+    renderGroup()
+  end)
+  onGMCPUpdate("Char.Group", function(pkg)
+    ensureTick()
+    group.group(hud.group.s, pkg)
+    renderGroup()
+  end)
+  onGMCPUpdate("Char.Allies", function(pkg)
+    ensureTick()
+    group.allies(hud.group.s, pkg)
+    renderGroup()
   end)
   onGMCPUpdate("Char.Items", function(pkg)
     ensureTick()
@@ -2863,10 +3371,12 @@ function onDisconnect()
   status.sever(hud.status.s, now)
   effects.sever(hud.effects.s, now)
   slots.sever(hud.slots.s)
+  group.sever(hud.group.s)
   pages.sever(hud.page.s)
   quests.sever(hud.quest.s)
   map.sever(hud.map.s)
   pushAll()
+  renderGroup()
   renderPage()
   renderQuest()
   renderMap()
